@@ -1,1 +1,2 @@
+extended_legged_gym/LidarSensor/LidarSensor/resources/robots/g1_29/robot_combined.stl filter=lfs diff=lfs merge=lfs -text
 *.stl filter=lfs diff=lfs merge=lfs -text
