@@ -443,7 +443,7 @@ class LidarSensor(BaseSensor):
         """Capture the render graph if not already created"""
         if self.graph is None:
             self.create_render_graph_pointcloud()
-    def tensor_indices_to_slice(idx: torch.Tensor):
+    def tensor_indices_to_slice(self, idx: torch.Tensor):
         # expects 1-D int tensor
         idx = idx.to(dtype=torch.long)
         if idx.numel() == 0:

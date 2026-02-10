@@ -5,7 +5,7 @@ export LD_LIBRARY_PATH=/home/hithcat/miniconda3/envs/fangzhen/lib:$LD_LIBRARY_PA
 
 # 2.训练
 ```bash
-python3 ./extended_legged_gym/legged_gym/legged_gym/scripts/train.py --task=anymal_c_flat
+python3 ./extended_legged_gym/legged_gym/legged_gym/scripts/train.py --task=anymal_c_flat --num_envs=1
 
 python3 ./extended_legged_gym/legged_gym/legged_gym/scripts/train.py --task=elspider_air_rough --num_envs=4 --max_iterations=10 
 

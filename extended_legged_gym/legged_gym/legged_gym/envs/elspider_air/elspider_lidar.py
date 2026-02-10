@@ -506,7 +506,17 @@ class ElSpiderLidar(ElSpider): # 继承
         
         obstacle_mesh_path = os.path.join(two_levels_up, "resources", "robots","el_mini", "robot_combined.stl")
         
-        obstacle_mesh = trimesh.load(obstacle_mesh_path)
+        # obstacle_mesh = trimesh.load(obstacle_mesh_path)
+        obstacle_mesh = trimesh.load(obstacle_mesh_path, force='mesh')
+
+        # trimesh.load may still return a Scene (e.g., OBJ/GLTF with multiple meshes)
+        if isinstance(obstacle_mesh, trimesh.Scene):
+            obstacle_mesh = trimesh.util.concatenate(
+                tuple(
+                    geom for geom in obstacle_mesh.geometry.values()
+                    if isinstance(geom, trimesh.Trimesh)
+                )
+            )
 
 
             #obstacle_mesh = trimesh.load(self.terrain_cfg.obstacle_config.obstacle_root_path+"/human/meshes/Male.OBJ")
