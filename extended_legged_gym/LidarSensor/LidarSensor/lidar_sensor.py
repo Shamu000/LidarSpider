@@ -285,6 +285,7 @@ class LidarSensor(BaseSensor):
         
         raise ValueError(f"Cannot generate ray angles for sensor type: {sensor_type_str}")
 
+    # 更新射线方向
     def update_ray_vectors(self):
         """Update ray vectors for sensors with dynamic patterns"""
         if self.sensor_cfg.is_simple_grid or self.sensor_cfg.is_height_scanner:
@@ -557,7 +558,7 @@ class LidarSensor(BaseSensor):
                 )
         
         # Convert results back to torch tensors
-        self.lidar_pixels_tensor = wp.to_torch(self.lidar_warp_tensor)
-        self.lidar_dist_tensor = wp.to_torch(self.local_dist)
+        self.lidar_pixels_tensor = wp.to_torch(self.lidar_warp_tensor) # shape: (num_envs, num_sensors, num_vertical_lines, num_horizontal_lines, 3)
+        self.lidar_dist_tensor = wp.to_torch(self.local_dist) # shape: (num_envs, num_sensors, num_vertical_lines, num_horizontal_lines)
         
         return self.lidar_pixels_tensor, self.lidar_dist_tensor 

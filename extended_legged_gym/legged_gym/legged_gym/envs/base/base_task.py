@@ -60,7 +60,7 @@ class BaseTask():
 
         self.num_envs = cfg.env.num_envs
         self.num_obs = cfg.env.num_observations
-        self.num_privileged_obs = cfg.env.num_privileged_obs
+        self.num_privileged_obs = cfg.env.num_privileged_obs # 特权(教师)信息维度
         self.num_actions = cfg.env.num_actions
 
         # optimization flags for pytorch JIT
@@ -68,11 +68,11 @@ class BaseTask():
         torch._C._jit_set_profiling_executor(False)
 
         # allocate buffers
-        self.obs_buf = torch.zeros(self.num_envs, self.num_obs, device=self.device, dtype=torch.float)
-        self.rew_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.float)
-        self.reset_buf = torch.ones(self.num_envs, device=self.device, dtype=torch.long)
-        self.episode_length_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.long)
-        self.time_out_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool)
+        self.obs_buf = torch.zeros(self.num_envs, self.num_obs, device=self.device, dtype=torch.float) # num_envs x num_obs
+        self.rew_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.float) # 每条环境的当前步奖励
+        self.reset_buf = torch.ones(self.num_envs, device=self.device, dtype=torch.long) # 标记哪些环境本步需要重置
+        self.episode_length_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.long) # 记录每个环境当前已经走了多少步
+        self.time_out_buf = torch.zeros(self.num_envs, device=self.device, dtype=torch.bool) # 标记哪些环境超时
         if self.num_privileged_obs is not None:
             self.privileged_obs_buf = torch.zeros(self.num_envs, self.num_privileged_obs, device=self.device, dtype=torch.float)
         else: 
@@ -95,9 +95,9 @@ class BaseTask():
             self.viewer = self.gym.create_viewer(
                 self.sim, gymapi.CameraProperties())
             self.gym.subscribe_viewer_keyboard_event(
-                self.viewer, gymapi.KEY_ESCAPE, "QUIT")
+                self.viewer, gymapi.KEY_ESCAPE, "QUIT") # 按 Esc 关闭仿真窗口。
             self.gym.subscribe_viewer_keyboard_event(
-                self.viewer, gymapi.KEY_V, "toggle_viewer_sync")
+                self.viewer, gymapi.KEY_V, "toggle_viewer_sync") # 焦点在仿真与显示之间切换
             
             self.vis = GymVisualizer(self.gym, self.sim, self.viewer, self.envs)
             

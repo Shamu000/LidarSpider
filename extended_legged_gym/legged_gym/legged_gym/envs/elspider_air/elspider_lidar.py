@@ -30,57 +30,6 @@ from LidarSensor.example.isaacgym.utils.terrain.terrain import Terrain
 from LidarSensor.example.isaacgym.utils.terrain.terrain_cfg import Terrain_cfg
 from LidarSensor import SENSOR_ROOT_DIR,RESOURCES_DIR
 
-
-# def save_video(frame_stack, key, format=None, fps=20, **imageio_kwargs):
-#     """
-#     Let's do the compression here. Video frames are first written to a temporary file
-#     and the file containing the compressed data is sent over as a file buffer.
-# 
-#     Save a stack of images to
-# 
-#     :param frame_stack: the stack of video frames
-#     :param key: the file key to which the video is logged.
-#     :param format: Supports 'mp4', 'gif', 'apng' etc.
-#     :param imageio_kwargs: (map) optional keyword arguments for `imageio.mimsave`.
-#     :return:
-# 
-#     在这里进行压缩。视频帧首先被写入到一个临时文件，随后将包含压缩数据的文件作为文件缓冲区发送。
-# 
-#     将一组图像保存到
-# 
-#     :param frame_stack: 视频帧的堆栈
-#     :param key: 用于记录视频的文件键（文件名或路径）
-#     :param format: 支持 'mp4'、'gif'、'apng' 等格式
-#     :param imageio_kwargs:（映射）传递给 `imageio.mimsave` 的可选关键字参数
-#     :return:
-#     """
-#     if format:
-#         key += "." + format
-#     else:
-#         # noinspection PyShadowingBuiltins
-#         _, format = os.path.splitext(key)
-#         if format:
-#             # noinspection PyShadowingBuiltins
-#             format = format[1:]  # to remove the dot
-#         else:
-#             # noinspection PyShadowingBuiltins
-#             format = "mp4"
-#             key += "." + format
-# 
-#     filename ="lidar_demo"
-#     import tempfile, imageio  # , logging as py_logging
-#     # py_logging.getLogger("imageio").setLevel(py_logging.WARNING)
-#     with tempfile.NamedTemporaryFile(suffix=f'.{format}') as ntp:
-#         from skimage.util import img_as_ubyte
-#         try:
-#             imageio.mimsave(key, img_as_ubyte(frame_stack), format=format, fps=fps, macro_block_size=1,**imageio_kwargs)
-#         except imageio.core.NeedDownloadError:
-#             imageio.plugins.ffmpeg.download()
-#             imageio.mimsave(key, img_as_ubyte(frame_stack), format=format, fps=fps, macro_block_size=1,**imageio_kwargs)
-#         ntp.seek(0)
-
-
-
 KEY_W = gymapi.KEY_W
 KEY_A = gymapi.KEY_A
 KEY_S = gymapi.KEY_S
@@ -120,6 +69,7 @@ def quat_from_euler_xyz(roll, pitch, yaw): # 欧拉角转四元数
 
     return torch.stack([qx, qy, qz, qw], dim=-1)
 
+# 笛卡尔坐标系到球坐标系转换函数，输入为 (x, y, z)，输出为 (r, theta, phi)
 @torch.jit.script
 def cart2sphere(cart): # 笛卡尔坐标系转球面坐标系
     epsilon = 1e-9
@@ -392,9 +342,9 @@ class ElSpiderLidar(ElSpider): # 继承
         self.lidar_update_counter = 0
         self.lidar_update_interval = self._get_lidar_update_interval()
 
-        # lidar_tensor:形状为 (num_envs, num_sensors, V, H, 3) 的点云(x, y, z)
+        # sensor_points_tensor:形状为 (num_envs, num_sensors, V, H, 3) 的点云(x, y, z)
         # sensor_dist_tensor:形状为 (num_envs, num_sensors, V, H) 的距离图(depth map)
-        self.lidar_tensor, self.sensor_dist_tensor = self.sensor.update() # 雷达扫描
+        self.sensor_points_tensor, self.sensor_dist_tensor = self.sensor.update() # 雷达扫描
 
         # Initialize keyboard state dictionary
         self.key_pressed = {}
@@ -470,6 +420,13 @@ class ElSpiderLidar(ElSpider): # 继承
         self.height_points = self._init_height_points()
         self.measured_heights=self._get_heights()
         
+        # LiDAR observation buffers
+        num_lidar_obs = self.num_theta_bins * self.num_phi_bins
+        self.lidar_obs_buf = torch.zeros(
+            self.num_envs, num_lidar_obs, device=self.device, requires_grad=False
+        )
+
+        # Raw LiDAR data buffers
         total_rays = self.sensor_cfg.horizontal_line_num * self.sensor_cfg.vertical_line_num
         self.lidar_points_buf = torch.zeros(
             self.num_envs, total_rays, 3, device=self.device, requires_grad=False
@@ -554,7 +511,7 @@ class ElSpiderLidar(ElSpider): # 继承
 
     def create_warp_tensor(self):
         self.warp_tensor_dict={}
-        self.lidar_tensor = torch.zeros(
+        self.sensor_points_tensor = torch.zeros(
                 (
                     self.num_envs,  #4
                     self.sensor_cfg.num_sensors, #1
@@ -601,36 +558,6 @@ class ElSpiderLidar(ElSpider): # 继承
         self.warp_tensor_dict['sensor_pos_tensor'] = self.sensor_pos_tensor
         self.warp_tensor_dict['sensor_quat_tensor'] = self.sensor_quat_tensor
         self.warp_tensor_dict['mesh_ids'] = self.mesh_ids
-        
-    # extended_legged_gym/legged_gym/legged_gym/utils/helpers.py/84
-    
-    # def create_sim(self):
-    #     """Create a Genesis simulation."""
-    #     # configure sim
-    #     sim_params = gymapi.SimParams()
-    #     dt =  0.02
-    #     self.dt = dt
-    #     sim_params.dt = dt
-    #     if args.physics_engine == gymapi.SIM_FLEX:
-    #         sim_params.flex.shape_collision_margin = 0.25
-    #         sim_params.flex.num_outer_iterations = 4
-    #         sim_params.flex.num_inner_iterations = 10
-    #     elif args.physics_engine == gymapi.SIM_PHYSX:
-    #         sim_params.substeps = 1
-    #         sim_params.physx.solver_type = 1
-    #         sim_params.physx.num_position_iterations = 4
-    #         sim_params.physx.num_velocity_iterations = 1
-    #         sim_params.physx.num_threads = args.num_threads
-    #         sim_params.physx.use_gpu = args.use_gpu
-    #         sim_params.up_axis = gymapi.UP_AXIS_Z
-    #         sim_params.gravity = gymapi.Vec3(0.0, 0.0, -9.81)
-    #     sim_params.use_gpu_pipeline = True    
-    #     if args.use_gpu_pipeline:
-    #         print("WARNING: Forcing CPU pipeline.")
-    #     self.sim = self.gym.create_sim(args.compute_device_id, args.graphics_device_id, args.physics_engine, sim_params)
-    #     if self.sim is None:
-    #         print("*** Failed to create sim")
-    #         quit()
 
     # keyboard 控制机器人移动
     def keyboard_input(self):
@@ -752,7 +679,7 @@ class ElSpiderLidar(ElSpider): # 继承
         current_time = self.sim_time
         
         # 1. 收集激光雷达局部点云数据 - 在激光雷达坐标系中
-        local_pixels = self.lidar_tensor.clone()  # [num_envs, num_sensors, vertical_lines, horizontal_lines, 3]
+        local_pixels = self.sensor_points_tensor.clone()  # [num_envs, num_sensors, vertical_lines, horizontal_lines, 3]
         
         # 2. 收集机器人位置 - 世界坐标系
         robot_positions = self.root_states[:, 0:3].clone()  # [num_envs, 3]
@@ -836,24 +763,28 @@ class ElSpiderLidar(ElSpider): # 继承
 
         self._update_lidar_pose()
         if self.lidar_update_counter % self.lidar_update_interval == 0:
-            self.lidar_tensor, self.sensor_dist_tensor = self.sensor.update()
+            self.sensor_points_tensor, self.sensor_dist_tensor = self.sensor.update()
             # Reshape data: (num_envs, num_sensors, v_lines, h_lines, 3) -> (num_envs, total_rays, 3)
             total_rays = self.sensor_cfg.horizontal_line_num * self.sensor_cfg.vertical_line_num
-            self.lidar_points_buf[:] = self.lidar_tensor.view(self.num_envs, -1, 3)[:, :total_rays, :]
+            self.lidar_points_buf[:] = self.sensor_points_tensor.view(self.num_envs, -1, 3)[:, :total_rays, :]
             self.lidar_dist_buf[:] = self.sensor_dist_tensor.view(self.num_envs, -1)[:, :total_rays]
         self.lidar_update_counter += 1
 
-    def _update_lidar_pose(self) -> None:
-        sensor_quat = quat_mul(self.base_quat, self.sensor_offset_quat)
-        sensor_pos = self.base_pos + quat_apply(self.base_quat, self.sensor_translation)
-        self.sensor_pos_tensor[:] = sensor_pos
-        self.sensor_quat_tensor[:] = sensor_quat
+        # Compute minimum obstacle distance
+        valid_mask = self.lidar_dist_buf < self.sensor_cfg.max_range
+        self.min_obstacle_dist[:] = self.sensor_cfg.max_range
+        for i in range(self.num_envs):
+            valid_dists = self.lidar_dist_buf[i][valid_mask[i]]
+            if valid_dists.numel() > 0:
+                self.min_obstacle_dist[i] = valid_dists.min()
 
-
-    def reset_idx(self, env_ids):
-        super().reset_idx(env_ids)
-        if self.sensor is not None and env_ids.numel() > 0:
-            self.sensor.reset(env_ids)
+        sphere_points = cart2sphere(self.lidar_points_buf.view(-1, 3)).view(self.num_envs, -1, 3)
+        downsampled = downsample_spherical_points_vectorized(
+            sphere_points, self.num_theta_bins, self.num_phi_bins
+        )
+        
+        # Use normalized distance as observation (0 = close, 1 = far/no hit)
+        self.lidar_obs_buf[:] = downsampled[:, :, 0].clamp(0, self.sensor_cfg.max_range) / self.sensor_cfg.max_range
 
     def check_termination(self):
         """Check termination conditions including collision detection."""
@@ -876,6 +807,47 @@ class ElSpiderLidar(ElSpider): # 继承
         collision = self.min_obstacle_dist < collision_threshold
         collision_termination = collision & (self.episode_length_buf > min_steps)
         self.reset_buf |= collision_termination # 按位或赋值
+    
+    def reset_idx(self, env_ids):
+        super().reset_idx(env_ids)
+        if self.sensor is not None and env_ids.numel() > 0:
+            self.sensor.reset(env_ids)
+
+    def compute_observations(self):
+        """Compute observations including LiDAR data."""
+        # Base observations (same as ElSpider)
+        base_obs_buf = torch.cat((self.base_lin_vel * self.obs_scales.lin_vel,
+                                  self.base_ang_vel * self.obs_scales.ang_vel,
+                                  self.projected_gravity,
+                                  self.commands[:, :3] * self.commands_scale,
+                                  self.commands[:, 4:],  # TODO: 确保commands的第四位开始真的有数据
+                                  (self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,
+                                  self.dof_vel * self.obs_scales.dof_vel,
+                                  self.actions
+                                  ), dim=-1)
+        
+        # Add height measurements if configured
+        if self.cfg.terrain.measure_heights:
+            heights = torch.clip(
+                self.root_states[:, 2].unsqueeze(1) - 0.5 - self.measured_heights,
+                -1, 1.
+            ) * self.obs_scales.height_measurements
+            base_obs_buf = torch.cat((base_obs_buf, heights), dim=-1)
+        
+        # Add LiDAR observations
+        self.obs_buf = torch.cat((base_obs_buf, self.lidar_obs_buf), dim=-1)
+        
+        # Add noise if needed
+        if self.add_noise:
+            self.obs_buf += (2 * torch.rand_like(self.obs_buf) - 1) * self.noise_scale_vec
+
+    def _update_lidar_pose(self) -> None:
+        sensor_quat = quat_mul(self.base_quat, self.sensor_offset_quat)
+        sensor_pos = self.base_pos + quat_apply(self.base_quat, self.sensor_translation)
+        self.sensor_pos_tensor[:] = sensor_pos
+        self.sensor_quat_tensor[:] = sensor_quat
+
+
     # ============== Reward Functions ==============
     
     def _reward_obstacle_avoidance(self):
@@ -945,7 +917,7 @@ def print_lidar_pos():
    
     
     # Print lidar position
-    # The env.lidar_tensor contains the lidar data we want to print
+    # The env.sensor_points_tensor contains the lidar data we want to print
     print(f"Lidar Position at {time.time():.3f}:")
     
     # Example: Print a summary of the lidar position data

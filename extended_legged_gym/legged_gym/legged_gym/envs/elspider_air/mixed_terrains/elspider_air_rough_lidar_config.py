@@ -12,8 +12,8 @@ from abc import ABC, abstractmethod
 class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
     class env(ElSpiderAirRoughTrainCfg.env):
         # Update observation space for raycast data
-        # num_observations = 66 + 512  # May need to adjust based on raycast points
-        num_observations = 66
+        num_observations = 66 + 96  # MID360
+        # num_observations = 66 # 无雷达
 
     class terrain(ElSpiderAirRoughTrainCfg.terrain):
         use_terrain_obj = False  # use TerrainObj class to create terrain

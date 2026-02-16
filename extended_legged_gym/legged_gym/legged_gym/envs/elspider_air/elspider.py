@@ -595,6 +595,8 @@ class FootTrackElSpider(ElSpider):
         # add noise if needed
         if self.add_noise:
             self.obs_buf += (2 * torch.rand_like(self.obs_buf) - 1) * self.noise_scale_vec
+        # print("obs_buf:", self.obs_buf)
+        print("我草你妈\n");
 
     def check_termination(self):
         """ Check if environments need to be reset

@@ -4,7 +4,8 @@ class ElSpiderAirLidarProgressiveCfg(ElSpiderAirFlatCfg):
     """渐进式LiDAR训练配置"""  
       
     class env(ElSpiderAirFlatCfg.env):  
-        num_observations = 66 + 512  # 基础观察 + LiDAR  
+        # num_observations = 66 + 512  # 基础观察 + LiDAR  
+        num_observations = 66
           
     class raycaster:  
         enable_raycast = True  
