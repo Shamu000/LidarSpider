@@ -144,6 +144,17 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
         origin_zero_z = True
         num_sub_terrains = num_rows * num_cols
 
+    class noise:
+        add_noise = False
+        noise_level = 1.0 # scales other values
+        class noise_scales:
+            dof_pos = 0.01
+            dof_vel = 0.5
+            lin_vel = 0.1
+            ang_vel = 0.2
+            gravity = 0.05
+            height_measurements = 0.1
+
     class LidarType(Enum):
         """Standardized lidar sensor types"""
         # Simple grid-based lidar
@@ -356,6 +367,10 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
             dof_align = 0.3
             dof_nominal_pos = 0.2
             reward_foot_z_align = 0.0
+            
+        foot_clearance_target = 0.04 # desired foot clearance above ground [m]
+        foot_height_offset = 0.0     # height of the foot coordinate origin above ground [m]
+        foot_clearance_tracking_sigma = 0.01
 
     # class viewer:
     #     ref_env = 0
@@ -390,7 +405,7 @@ class ElSpiderAirRoughLidarCfgPPO(LeggedRobotCfgPPO):
 
     class runner(LeggedRobotCfgPPO.runner):
         run_name = ''
-        experiment_name = 'elspider_air_rough_lidar'
+        experiment_name = 'elspider_air_rough_lidar' # 保存的log文件夹名称
         load_run = -1
         max_iterations = 5000
         

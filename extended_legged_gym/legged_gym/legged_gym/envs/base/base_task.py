@@ -89,18 +89,22 @@ class BaseTask():
         self.enable_viewer_sync = True
         self.viewer = None
 
-        # if running with a viewer, set up keyboard shortcuts and camera
-        if self.headless == False:
-            # subscribe to keyboard shortcuts
-            self.viewer = self.gym.create_viewer(
-                self.sim, gymapi.CameraProperties())
-            self.gym.subscribe_viewer_keyboard_event(
-                self.viewer, gymapi.KEY_ESCAPE, "QUIT") # 按 Esc 关闭仿真窗口。
-            self.gym.subscribe_viewer_keyboard_event(
-                self.viewer, gymapi.KEY_V, "toggle_viewer_sync") # 焦点在仿真与显示之间切换
+        # # if running with a viewer, set up keyboard shortcuts and camera
+        # if self.headless == False:
+        #     # subscribe to keyboard shortcuts
+        #     self.viewer = self.gym.create_viewer(
+        #         self.sim, gymapi.CameraProperties())
+        #     self.gym.subscribe_viewer_keyboard_event(
+        #         self.viewer, gymapi.KEY_ESCAPE, "QUIT") # 按 Esc 关闭仿真窗口。
+        #     self.gym.subscribe_viewer_keyboard_event(
+        #         self.viewer, gymapi.KEY_V, "toggle_viewer_sync") # 焦点在仿真与显示之间切换
             
-            self.vis = GymVisualizer(self.gym, self.sim, self.viewer, self.envs)
+        #     self.vis = GymVisualizer(self.gym, self.sim, self.viewer, self.envs)
             
+
+    def create_sim(self):
+        """Initialize the Isaac Gym simulation."""
+        
 
     def get_observations(self):
         return self.obs_buf

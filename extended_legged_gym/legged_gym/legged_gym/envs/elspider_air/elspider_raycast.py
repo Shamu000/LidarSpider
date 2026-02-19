@@ -15,6 +15,7 @@ from legged_gym.utils import GaitScheduler, GaitSchedulerCfg, AsyncGaitScheduler
 from legged_gym.utils.helpers import class_to_dict
 from isaacgym.torch_utils import quat_apply, quat_rotate, quat_rotate_inverse
 from legged_gym import LEGGED_GYM_ROOT_DIR
+from .mixed_terrains.elspider_air_rough_raycast_config import ElSpiderAirRoughRaycastCfg
 
 
 class ElSpiderRayCast(LeggedRobotDepth):
@@ -23,6 +24,7 @@ class ElSpiderRayCast(LeggedRobotDepth):
     This class extends LeggedRobotRayCast to implement the ElSpider robot
     with raycast perception instead of height measurements.
     """
+    cfg: ElSpiderAirRoughRaycastCfg
 
     def __init__(self, cfg, sim_params, physics_engine, sim_device, headless):
         super().__init__(cfg, sim_params, physics_engine, sim_device, headless)

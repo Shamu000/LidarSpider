@@ -135,6 +135,7 @@ class LeggedRobot(BaseTask, LeggedRobotRewMixin):
 
         self.foot_positions = self.rigid_body_state.view(self.num_envs, self.num_bodies, 13)[:, self.feet_indices, 0:3]
         self.foot_velocities = self.rigid_body_state.view(self.num_envs, self.num_bodies, 13)[:, self.feet_indices, 7:10]
+        self.last_foot_velocities[:] = self.foot_velocities[:]
 
         self._post_physics_step_callback()
 
@@ -145,6 +146,7 @@ class LeggedRobot(BaseTask, LeggedRobotRewMixin):
         self.reset_idx(env_ids)
         self.compute_observations()  # in some cases a simulation step might be required to refresh some obs (for example body positions)
 
+        self.llast_actions[:] = self.last_actions[:]
         self.last_actions[:] = self.actions[:]
         self.last_dof_vel[:] = self.dof_vel[:]
         self.last_root_vel[:] = self.root_states[:, 7:13]
@@ -186,6 +188,8 @@ class LeggedRobot(BaseTask, LeggedRobotRewMixin):
 
         # reset buffers
         self.last_actions[env_ids] = 0.
+        self.llast_actions[env_ids] = 0.
+        self.last_foot_velocities[env_ids] = 0.
         self.last_dof_vel[env_ids] = 0.
         self.feet_air_time[env_ids] = 0.
         self.feet_contact_time[env_ids] = 0.
@@ -212,6 +216,7 @@ class LeggedRobot(BaseTask, LeggedRobotRewMixin):
         if self.cfg.env.send_timeouts:
             self.extras["time_outs"] = self.time_out_buf
 
+    # 根据读取的奖励函数变量名计算并求和rew
     def compute_reward(self):
         """ Compute rewards
             Calls each reward function which had a non-zero scale (processed in self._prepare_reward_function())
@@ -597,6 +602,8 @@ class LeggedRobot(BaseTask, LeggedRobotRewMixin):
         self.actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)
         self.last_actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float,
                                         device=self.device, requires_grad=False)
+        self.llast_actions = torch.zeros(self.num_envs, self.num_actions, dtype=torch.float, device=self.device, requires_grad=False)  # last last actions
+        
         self.last_dof_vel = torch.zeros_like(self.dof_vel)
         self.last_root_vel = torch.zeros_like(self.root_states[:, 7:13])
         self.commands = torch.zeros(self.num_envs, self.cfg.commands.num_commands, dtype=torch.float,
@@ -614,6 +621,7 @@ class LeggedRobot(BaseTask, LeggedRobotRewMixin):
         # NOTE: Using var index (feet_indices) will not keep the reference updated automatically.
         self.foot_positions = self.rigid_body_state.view(self.num_envs, self.num_bodies, 13)[:, self.feet_indices, 0:3]
         self.foot_velocities = self.rigid_body_state.view(self.num_envs, self.num_bodies, 13)[:, self.feet_indices, 7:10]
+        self.last_foot_velocities = torch.zeros_like(self.foot_velocities)
         # self.foot_velocities_ang = self.rigid_body_state.view(self.num_envs, self.num_bodies, 13)[:, self.feet_indices, 10: 13]
         # self.calf_positions = self.rigid_body_state.view(self.num_envs, self.num_bodies, 13)[:, self.calf_indices, 0:3]
 
@@ -647,6 +655,7 @@ class LeggedRobot(BaseTask, LeggedRobotRewMixin):
                     print(f"PD gain of joint {name} were not defined, setting them to zero")
         self.default_dof_pos = self.default_dof_pos.unsqueeze(0)
 
+    # 从环境中读取_reward_开头的函数作为奖励函数的函数名
     def _prepare_reward_function(self):
         """ Prepares a list of reward functions, whcih will be called to compute the total reward.
             Looks for self._reward_<REWARD_NAME>, where <REWARD_NAME> are names of all non zero reward scales in the cfg.

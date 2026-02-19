@@ -24,6 +24,7 @@ from legged_gym.utils import GaitScheduler, GaitSchedulerCfg, AsyncGaitScheduler
     SimpleRaibertPlannerConfig, SimpleRaibertPlanner, RaibertPlanner, RaibertPlannerConfig
 from legged_gym.utils.helpers import class_to_dict
 from legged_gym.utils.math_utils import quat_apply_yaw
+from legged_gym.utils.gym_visualizer import GymVisualizer
 
 from LidarSensor.lidar_sensor import LidarSensor
 from LidarSensor.example.isaacgym.utils.terrain.terrain import Terrain
@@ -332,6 +333,7 @@ class ElSpiderLidar(ElSpider): # 继承
             print(f"######Data will be saved to: {self.data_dir}")
         
         self.create_ground()
+        self.create_viewer()
 
         self._init_buffer() # 绑定 Isaac Gym root state，与 GPU 张量同步
         self.create_warp_env() # Warp 格式的 mesh 用于 Lidar 仿真
@@ -558,6 +560,27 @@ class ElSpiderLidar(ElSpider): # 继承
         self.warp_tensor_dict['sensor_pos_tensor'] = self.sensor_pos_tensor
         self.warp_tensor_dict['sensor_quat_tensor'] = self.sensor_quat_tensor
         self.warp_tensor_dict['mesh_ids'] = self.mesh_ids
+
+    def create_viewer(self):
+        # create viewer
+        if self.headless == True:
+            self.viewer = None
+            print("Running in headless mode")
+        else:
+            self.debug_viz = True
+            self.viewer = self.gym.create_viewer(
+                self.sim, gymapi.CameraProperties())
+            if self.viewer is None:
+                print("*** Failed to create viewer")
+                quit()
+            self.gym.subscribe_viewer_keyboard_event(
+                self.viewer, gymapi.KEY_ESCAPE, "QUIT") # 按 Esc 关闭仿真窗口。
+            self.gym.subscribe_viewer_keyboard_event(
+                self.viewer, gymapi.KEY_V, "toggle_viewer_sync") # 焦点在仿真与显示之间切换
+            
+            self.vis = GymVisualizer(self.gym, self.sim, self.viewer, self.envs)
+
+
 
     # keyboard 控制机器人移动
     def keyboard_input(self):
@@ -841,6 +864,36 @@ class ElSpiderLidar(ElSpider): # 继承
         if self.add_noise:
             self.obs_buf += (2 * torch.rand_like(self.obs_buf) - 1) * self.noise_scale_vec
 
+    def _get_noise_scale_vec(self, cfg):
+        """ Sets a vector used to scale the noise added to the observations.
+            [NOTE]: Must be adapted when changing the observations structure
+
+        Args:
+            cfg (Dict): Environment config file
+
+        Returns:
+            [torch.Tensor]: Vector of scales used to multiply a uniform distribution in [-1, 1]
+        """
+        noise_vec = torch.zeros_like(self.obs_buf[0])
+        self.add_noise = self.cfg.noise.add_noise
+        noise_scales = self.cfg.noise.noise_scales
+        noise_level = self.cfg.noise.noise_level
+        noise_vec[:3] = noise_scales.lin_vel * \
+            noise_level * self.obs_scales.lin_vel
+        noise_vec[3:6] = noise_scales.ang_vel * \
+            noise_level * self.obs_scales.ang_vel
+        noise_vec[6:9] = noise_scales.gravity * noise_level
+        noise_vec[9:12] = 0.  # commands
+        noise_vec[12:30] = noise_scales.dof_pos * \
+            noise_level * self.obs_scales.dof_pos
+        noise_vec[30:48] = noise_scales.dof_vel * \
+            noise_level * self.obs_scales.dof_vel
+        noise_vec[48:66] = 0.  # previous actions
+        noise_vec[66:] = 0. # LiDAR observations already have noise from the sensor model
+        if self.cfg.terrain.measure_heights:
+            noise_vec[48:235] = noise_scales.height_measurements * noise_level * self.obs_scales.height_measurements
+        return noise_vec
+
     def _update_lidar_pose(self) -> None:
         sensor_quat = quat_mul(self.base_quat, self.sensor_offset_quat)
         sensor_pos = self.base_pos + quat_apply(self.base_quat, self.sensor_translation)
@@ -849,7 +902,87 @@ class ElSpiderLidar(ElSpider): # 继承
 
 
     # ============== Reward Functions ==============
+    def _reward_base_height(self):
+        # Penalize base height away from target
+        base_height = torch.mean(self.base_pos[:, 2].unsqueeze(
+            1) - self.measured_heights, dim=1)
+        # print(f"base height: {base_height}")
+        rew = torch.square(base_height - self.cfg.rewards.base_height_target)
+        return rew
     
+    def _reward_dof_power(self):
+        # Penalize power consumption
+        return torch.sum(torch.abs(self.torques * self.dof_vel), dim=1)
+
+    def _reward_action_smoothness(self):
+        '''Penalize action smoothness'''
+        action_smoothness_cost = torch.sum(torch.square(
+            self.actions - 2*self.last_actions + self.llast_actions), dim=-1)
+        return action_smoothness_cost
+
+    # def _reward_tracking_lin_vel(self):
+    #     # Tracking of linear velocity commands (xy axes)
+    #     lin_vel_error = torch.sum(torch.square(self.commands[:, :2] - self.base_lin_vel[:, :2]), dim=1)
+    #     return torch.exp(-lin_vel_error/self.cfg.rewards.tracking_sigma)
+
+    # def _reward_tracking_ang_vel(self):
+        # Tracking of angular velocity commands (yaw)
+        ang_vel_error = torch.square(self.commands[:, 2] - self.base_ang_vel[:, 2])
+        return torch.exp(-ang_vel_error/self.cfg.rewards.tracking_sigma)
+
+    def _reward_feet_air_time(self):
+        # Reward long steps
+        contact = self.contact_forces[:, self.feet_indices, 2] > 1.
+        contact_filt = torch.logical_or(contact, self.last_contacts)
+        self.last_contacts = contact
+        first_contact = (self.feet_air_time > 0.) * contact_filt
+        self.feet_air_time += self.dt
+        rew_airTime = torch.sum((self.feet_air_time - 0.3) * first_contact, dim=1)  # reward only on first contact with the ground
+        rew_airTime *= torch.norm(self.commands[:, :2], dim=1) > 0.1  # no reward for zero command
+        self.feet_air_time *= ~contact_filt
+        return rew_airTime
+
+    # def _reward_dof_vel_stand_still(self):
+    #     # Penalize motion at zero commands
+    #     return torch.sum(torch.abs(self.dof_vel), dim=1) * (torch.norm(self.commands[:, :3], dim=1) < 0.1)
+
+    # def _reward_dof_pos_stand_still(self):
+    #     # Penalize position deviation at zero commands
+    #     return torch.sum(torch.square(self.dof_pos - self.default_dof_pos), dim=1) * (torch.norm(self.commands[:, :3], dim=1) < 0.1)
+    
+    # def _reward_feet_contact_stand_still(self):
+    #     # Encourage feet contact with the ground at zero commands
+    #     contacts = self.link_contact_forces[:, self.feet_contact_indices, 2] > 0.1
+    #     full_contact = torch.sum(1.*contacts, dim=1)==len(self.feet_contact_indices)
+    #     return 1.0*full_contact * (torch.norm(self.commands[:, :3], dim=1) < 0.1)
+    
+    # def _reward_dof_close_to_default(self):
+        # Penalize dof position deviation from default
+        return torch.sum(torch.square(self.dof_pos - self.default_dof_pos), dim=1)
+
+    def _reward_foot_clearance(self):
+        """
+        Encourage feet to be close to desired height while swinging
+        """
+        foot_vel_xy_norm = torch.norm(self.foot_velocities[:, :, :2], dim=-1)
+        # print(f"feet pos: {self.feet_pos[:, :, 2]}")
+        clearance_error = torch.sum(
+            foot_vel_xy_norm * torch.square(
+                self.foot_positions[:, :, 2] -
+                self.cfg.rewards.foot_clearance_target -
+                self.cfg.rewards.foot_height_offset
+            ), dim=-1
+        )
+        return torch.exp(-clearance_error / self.cfg.rewards.foot_clearance_tracking_sigma)
+    
+    def _reward_foot_acc(self):
+        '''reward for foot acceleration'''
+        foot_acc = (self.foot_velocities - self.last_foot_velocities) / self.dt
+        return torch.sum(torch.square(foot_acc), dim=(1, 2))
+
+
+
+
     def _reward_obstacle_avoidance(self):
         """Reward for maintaining safe distance from obstacles."""
         # Reward increases with distance from obstacles
@@ -868,16 +1001,16 @@ class ElSpiderLidar(ElSpider): # 继承
         penalty = torch.clamp(penalty, 0, 10)
         return -penalty
 
-    def _reward_exploration(self):
-        """Reward for exploring while avoiding obstacles."""
-        # Combine forward velocity with obstacle avoidance
-        forward_vel = self.base_lin_vel[:, 0]
-        safe_dist = getattr(self.cfg.rewards, 'safe_obstacle_dist', 0.5)
+    # def _reward_exploration(self):
+    #     """Reward for exploring while avoiding obstacles."""
+    #     # Combine forward velocity with obstacle avoidance
+    #     forward_vel = self.base_lin_vel[:, 0]
+    #     safe_dist = getattr(self.cfg.rewards, 'safe_obstacle_dist', 0.5)
         
-        # Only reward forward movement when it's safe
-        safety_factor = torch.clamp(self.min_obstacle_dist / safe_dist, 0, 1)
-        exploration_reward = forward_vel * safety_factor
-        return torch.clamp(exploration_reward, -1, 1)
+    #     # Only reward forward movement when it's safe
+    #     safety_factor = torch.clamp(self.min_obstacle_dist / safe_dist, 0, 1)
+    #     exploration_reward = forward_vel * safety_factor
+    #     return torch.clamp(exploration_reward, -1, 1)
 
     def _draw_debug_vis(self):
         """Draw debug visualization including LiDAR points."""

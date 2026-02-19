@@ -33,7 +33,6 @@ from datetime import datetime
 from typing import Tuple, Type, Dict
 import torch
 import numpy as np
-
 from rsl_rl.env import VecEnv
 from rsl_rl.runners import OnPolicyRunner
 

@@ -88,8 +88,8 @@ class Distillation:
 
     def act(self, obs, teacher_obs):
         # compute the actions
-        self.transition.actions = self.policy.act(obs).detach()
-        self.transition.privileged_actions = self.policy.evaluate(teacher_obs).detach()
+        self.transition.actions = self.policy.act(obs).detach() # 学生的动作
+        self.transition.privileged_actions = self.policy.evaluate(teacher_obs).detach() # 教师的动作
         # record the observations
         self.transition.observations = obs
         self.transition.privileged_observations = teacher_obs
@@ -111,11 +111,13 @@ class Distillation:
         cnt = 0
 
         for epoch in range(self.num_learning_epochs):
+            # 重置策略网络的隐藏状态为上一次更新结束时的状态，这让网络能“延续”之前的记忆，而不是每次从零开始
             self.policy.reset(hidden_states=self.last_hidden_states)
+            # 把刚刚设置的隐藏状态进行detach，防止梯度流到上一次的计算图
             self.policy.detach_hidden_states()
             for obs, _, _, privileged_actions, dones in self.storage.generator():
 
-                # inference the student for gradient computation
+                # inference the student for gradient computation 推理学生动作
                 actions = self.policy.act_inference(obs)
 
                 # behavior cloning loss

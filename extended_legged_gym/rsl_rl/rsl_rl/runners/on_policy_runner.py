@@ -78,6 +78,7 @@ def detect_interface_version(env: VecEnv) -> bool:
 
 class OnPolicyRunner:
     """On-policy runner for training and evaluation."""
+    # 默认旧版接口
 
     def __init__(self, env: VecEnv, train_cfg: dict, log_dir: Optional[str] = None, device="cpu"):
         self.device = device
@@ -92,6 +93,7 @@ class OnPolicyRunner:
         self.use_old_interface = USE_OLD_INTERFACE
 
         # Parse configuration based on interface version
+        # 解析PPO配置
         self._parse_config(train_cfg)
 
         # Configure multi-GPU if available
@@ -101,15 +103,19 @@ class OnPolicyRunner:
         num_obs, num_privileged_obs = self._setup_observations()
 
         # Initialize policy
+        # 初始化神经网路结构，当前默认是ActorCritic
         policy = self._initialize_policy(num_obs, num_privileged_obs)
 
         # Setup RND if configured
+        # 当前默认不RND
         self._setup_rnd()
 
         # Setup symmetry if configured
+        # 对称性训练配置
         self._setup_symmetry()
 
         # Initialize algorithm
+        # 当前默认PPO算法
         self.alg = self._initialize_algorithm(policy)
 
         # Store training configuration
@@ -117,6 +123,7 @@ class OnPolicyRunner:
         self.save_interval = self.cfg["save_interval"]
 
         # Setup empirical normalization
+        # 经验归一化，实际是使输入的均值为0，方差为1
         self._setup_normalization(num_obs, num_privileged_obs)
 
         # Initialize storage
@@ -145,7 +152,7 @@ class OnPolicyRunner:
         if self.use_old_interface:
             # Old interface: train_cfg has "runner", "algorithm", "policy" keys
             self.cfg = train_cfg["runner"]
-            self.alg_cfg = train_cfg["algorithm"]
+            self.alg_cfg = train_cfg["algorithm"] # 算法配置
             self.policy_cfg = train_cfg["policy"]
         else:
             # New interface: train_cfg is the direct config or has different structure
@@ -176,7 +183,6 @@ class OnPolicyRunner:
             else:
                 self.training_type = "rl"
                 self.privileged_obs_type = "critic" if num_privileged_obs != num_obs else None
-
         else:
             # New interface: resolve training type and observations
             if "class_name" in self.alg_cfg:
@@ -216,6 +222,7 @@ class OnPolicyRunner:
 
     def _initialize_policy(self, num_obs: int, num_privileged_obs: int):
         """Initialize policy based on configuration."""
+        # 相对于获取对应的类的名称，并且作为对象可以直接用于初始化
         if self.use_old_interface:
             # Old interface: use policy_class_name
             policy_class = eval(self.cfg["policy_class_name"])
@@ -391,15 +398,16 @@ class OnPolicyRunner:
         for it in range(start_iter, tot_iter):
             start = time.time()
 
-            # Rollout phase
+            # Rollout phase 推理一定步数，其中每步都会计算奖励
             with torch.inference_mode():
                 for _ in range(self.num_steps_per_env):
-                    # Sample actions
+                    # Sample actions 返回学生动作
                     actions = self.alg.act(obs, privileged_obs)
 
                     # Step environment
                     if self.use_old_interface:
                         # Old interface: step returns (obs, privileged_obs, rewards, dones, infos)
+                        # obs_buf, privileged_obs_buf, rew_buf, reset_buf, extras
                         step_result = self.env.step(actions.to(self.env.device))
                         if len(step_result) == 5:
                             obs, privileged_obs, rewards, dones, infos = step_result
@@ -422,7 +430,7 @@ class OnPolicyRunner:
                     obs, rewards, dones = obs.to(self.device), rewards.to(self.device), dones.to(self.device)
                     privileged_obs = privileged_obs.to(self.device)
 
-                    # Apply normalization
+                    # Apply normalization 经验归一化
                     obs = self.obs_normalizer(obs)
                     privileged_obs = self.privileged_obs_normalizer(privileged_obs)
 
