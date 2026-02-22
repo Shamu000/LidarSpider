@@ -17,10 +17,10 @@ python3 ./extended_legged_gym/legged_gym/legged_gym/scripts/train.py --task=elsp
 
 # 3.测试
 ```bash
-python3 /home/hithcat/Code/tools/PegasusFlow/extended_legged_gym/legged_gym/legged_gym/scripts/play.py \
-        --task anymal_c_flat \
-        --num_envs 16 \
-        --load_run Nov11_22-44-25_ \ # /home/hithcat/Code/DaChuang/final/OmniPerception/extended_legged_gym/legged_gym/logs/rough_elspider_air
+python3 ./extended_legged_gym/legged_gym/legged_gym/scripts/play.py \
+        --task elspider_air_rough_lidar \
+        --num_envs 1 \
+        --load_run Feb19_20-47-13_ \
         --checkpoint -1
 ```
 
@@ -61,40 +61,3 @@ python3 /home/hithcat/Code/DaChuang/final/OmniPerception/extended_legged_gym/leg
     --max_iterations 10
 ```
 
-python3 /home/hithcat/Code/DaChuang/final/OmniPerception/extended_legged_gym/legged_gym/legged_gym/scripts/train_lidar_progressive.py \
-    --curriculum_level=0 --num_envs=2 
-
-# 6.训练输出反馈
-```bash
-Load Reward Name:  _reward_action_rate
-Load Reward Name:  _reward_ang_vel_xy
-Load Reward Name:  _reward_base_height
-Load Reward Name:  _reward_collision
-Load Reward Name:  _reward_dof_acc
-Load Reward Name:  _reward_dof_pos_limits
-Load Reward Name:  _reward_feet_air_time
-Load Reward Name:  _reward_gait_2_step
-Load Reward Name:  _reward_lin_vel_z
-Load Reward Name:  _reward_orientation
-Load Reward Name:  _reward_torques
-Load Reward Name:  _reward_tracking_ang_vel
-Load Reward Name:  _reward_tracking_lin_vel
-Actor MLP: Sequential(
-  (0): Linear(in_features=253, out_features=128, bias=True)
-  (1): ELU(alpha=1.0)
-  (2): Linear(in_features=128, out_features=64, bias=True)
-  (3): ELU(alpha=1.0)
-  (4): Linear(in_features=64, out_features=32, bias=True)
-  (5): ELU(alpha=1.0)
-  (6): Linear(in_features=32, out_features=18, bias=True)
-)
-Critic MLP: Sequential(
-  (0): Linear(in_features=253, out_features=128, bias=True)
-  (1): ELU(alpha=1.0)
-  (2): Linear(in_features=128, out_features=64, bias=True)
-  (3): ELU(alpha=1.0)
-  (4): Linear(in_features=64, out_features=32, bias=True)
-  (5): ELU(alpha=1.0)
-  (6): Linear(in_features=32, out_features=1, bias=True)
-)
-```

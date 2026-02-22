@@ -2,6 +2,7 @@ import os
 import numpy as np
 from functools import lru_cache
 from typing import Tuple, Union
+from ...sensor_config.lidar_sensor_config import LidarConfig, LidarType
 
 
 class SpinningLidarGenerator:
@@ -156,7 +157,8 @@ class LivoxGenerator:
             "samples": 24000,
         }
     }
-    def __init__(self, name):
+    def __init__(self, name, sensor_cfg:LidarConfig):
+        # 从npy文件中加载以用于保存数据
         if name in self.livox_lidar_params:
             self.laser_min_range = self.livox_lidar_params[name]["laser_min_range"]
             self.laser_max_range = self.livox_lidar_params[name]["laser_max_range"]
@@ -177,7 +179,7 @@ class LivoxGenerator:
             self.ray_part1 = self.ray_angles[self.currStartIndex:]
             self.ray_part2 = self.ray_angles[:self.samples - len(self.ray_part1)]
             self.currStartIndex = self.samples - len(self.ray_part1)
-            self.ray_out = np.concatenate([self.ray_part1, self.ray_part2], axis=0)
+            self.ray_out = np.concatenate([self.ray_part1, self.ray_part2], axis=0) # 拼接
         else:
             self.ray_part1 = self.ray_angles[self.currStartIndex:self.currStartIndex + self.samples]
             self.currStartIndex += self.samples

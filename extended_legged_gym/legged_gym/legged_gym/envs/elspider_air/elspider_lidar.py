@@ -143,25 +143,28 @@ def euler_from_quaternion(quat_angle):  # 四元数转欧拉角
      
         return roll_x, pitch_y, yaw_z # in radians
     
-def farthest_point_sampling(point_cloud, sample_size): # 远点采样FPS算法
+def farthest_point_sampling(point_cloud, dist_tensor, sample_size): # 远点采样FPS算法
     """
     Sample points using the farthest point sampling algorithm
     Args:
-        point_cloud: Tensor of shape (num_envs, 1, num_points,1, 3)
+        point_cloud: Tensor of shape (num_envs, 1, num_points, 3)
+        dist_tensor: Optional tensor of shape (num_envs, 1, num_points)
         sample_size: Number of points to sample
     Returns:
         Downsampled point cloud of shape (num_envs, 1, sample_size, 3)
+        Sampled distances of shape (num_envs, 1, sample_size) if dist_tensor is provided
     """
     num_envs, _, num_points, _ = point_cloud.shape
     device = point_cloud.device
     result = []
+    dist_result = []
     
     for env_idx in range(num_envs):
-        points = point_cloud[env_idx, 0]  # (num_points, 3)
+        points = point_cloud[env_idx, 0]  # 取第一维是env_idx，第二维是0的数据：(num_points, 3)
         
         # Initialize with a random point
         sampled_indices = torch.zeros(sample_size, dtype=torch.long, device=device)
-        sampled_indices[0] = torch.randint(0, num_points, (1,), device=device) # 随机取一个点的索引作为初始点
+        sampled_indices[0] = torch.randint(0, num_points, (1,), device=device) # 随机生成一个形状为(1,)的张量，值在0到num_points之间
         
         # Calculate distances
         distances = torch.norm(points - points[sampled_indices[0]], dim=1)
@@ -169,7 +172,7 @@ def farthest_point_sampling(point_cloud, sample_size): # 远点采样FPS算法
         # Iteratively select farthest points
         for i in range(1, sample_size):
             # Select the farthest point
-            sampled_indices[i] = torch.argmax(distances) # 得到当前最远点索引，新增采样集合
+            sampled_indices[i] = torch.argmax(distances) # 得到当前最远点的索引
             
             # Update distances
             if i < sample_size - 1:
@@ -179,8 +182,16 @@ def farthest_point_sampling(point_cloud, sample_size): # 远点采样FPS算法
         # Get the sampled points
         sampled_points = points[sampled_indices] # 保留特征点
         result.append(sampled_points.unsqueeze(0))  # 新增一个维度，即一个传感器数量：[sample_size, 3]->[1, sample_size, 3]
+
+        # Get the sampled distances if provided
+        if dist_tensor is not None:
+            dists = dist_tensor[env_idx, 0]
+            sampled_dists = dists[sampled_indices]
+            dist_result.append(sampled_dists.unsqueeze(0))
     
-    return torch.stack(result) 
+    if dist_tensor is not None:
+        return torch.stack(result), torch.stack(dist_result)
+    return torch.stack(result)
 
 def downsample_spherical_points_vectorized(sphere_points, num_theta_bins=10, num_phi_bins=10): # 球面坐标点云进行二维角度网格划分
     """
@@ -286,22 +297,22 @@ class ElSpiderLidar(ElSpider): # 继承
         self.sensor_cfg = sensor_cfg
         """Initialize a minimal lidar sensor environment."""
         self.sensor_cfg = sensor_cfg # Lidar 配置对象
-        self.sensor_cfg.sensor_type = self.cfg.LidarType.AVIA # mid360,horizon,HAP,mid70,mid40,tele,avia
+        self.sensor_cfg.sensor_type = self.cfg.LidarType.MID360 # mid360,horizon,HAP,mid70,mid40,tele,avia
         self.sim_time = 0 # 记录仿真时间
         self.sensor_update_time = 0 # 记录传感器更新时间
         self.state_update_time = 0 # 传感器更新时间，超过阈值后更新并清空
-        self.sensor_cfg.update_frequency = 20.0 # 传感器更新频率
-        self.sensor_cfg.max_range = 5.0
+        self.sensor_cfg.update_frequency = 10.0 # 传感器更新频率
+        self.sensor_cfg.max_range = 50.0
         self.sensor_cfg.min_range = 0.1
-        self.sensor_cfg.horizontal_line_num = 36
-        self.sensor_cfg.vertical_line_num = 10
+        self.sensor_cfg.horizontal_line_num = 40
+        self.sensor_cfg.vertical_line_num = 50
         self.sensor_cfg.horizontal_fov_deg_min = -180
         self.sensor_cfg.horizontal_fov_deg_max = 180
-        self.sensor_cfg.vertical_fov_deg_min = -15
-        self.sensor_cfg.vertical_fov_deg_max = 15
-        self.sensor_cfg.dt = 0.02 # 传感器时间步长(TODO: 与sim对应吗？)
+        self.sensor_cfg.vertical_fov_deg_min = -7
+        self.sensor_cfg.vertical_fov_deg_max = 52
+        self.sensor_cfg.dt = 0.1 # 传感器时间步长(TODO: 与sim对应吗？)
         self.sensor_cfg.pointcloud_in_world_frame = False # 点云数据是否在世界坐标系下
-        self.num_theta_bins = 12
+        self.num_theta_bins = 24
         self.num_phi_bins = 8
 
     def _init_lidar_sensor(self,
@@ -346,6 +357,7 @@ class ElSpiderLidar(ElSpider): # 继承
 
         # sensor_points_tensor:形状为 (num_envs, num_sensors, V, H, 3) 的点云(x, y, z)
         # sensor_dist_tensor:形状为 (num_envs, num_sensors, V, H) 的距离图(depth map)
+        self.sensor.capture()
         self.sensor_points_tensor, self.sensor_dist_tensor = self.sensor.update() # 雷达扫描
 
         # Initialize keyboard state dictionary
@@ -385,10 +397,9 @@ class ElSpiderLidar(ElSpider): # 继承
 
     def create_ground(self):
         """Create a ground plane."""
-        self.terrain_cfg = Terrain_cfg()
+        self.terrain_cfg = ElSpiderAirRoughLidarCfg.Terrain_cfg()
         self.terrain = Terrain(self.terrain_cfg, self.num_envs)
         
-
     def _init_buffer(self):
         """Initialize buffers including LiDAR observation buffers."""
         super()._init_buffers()
@@ -425,7 +436,7 @@ class ElSpiderLidar(ElSpider): # 继承
         # LiDAR observation buffers
         num_lidar_obs = self.num_theta_bins * self.num_phi_bins
         self.lidar_obs_buf = torch.zeros(
-            self.num_envs, num_lidar_obs, device=self.device, requires_grad=False
+            self.num_envs, num_lidar_obs*3, device=self.device, requires_grad=False
         )
 
         # Raw LiDAR data buffers
@@ -442,7 +453,7 @@ class ElSpiderLidar(ElSpider): # 继承
             self.num_envs, device=self.device, requires_grad=False
         ) * self.sensor_cfg.max_range
         
-        self.sensor_translation = torch.tensor([0.0002835, 0.00003, 0.41818], device=self.device).repeat((self.num_envs, 1)) # 重点：把传感器放置在正确位置
+        self.sensor_translation = torch.tensor([0.3, 0., 0.1], device=self.device).repeat((self.num_envs, 1)) # 重点：把传感器放置在正确位置
         rpy_offset = torch.tensor([3.14, 0., 0], device=self.device) # 传感器的固定姿态偏移
         self.sensor_offset_quat = quat_from_euler_xyz(rpy_offset[0], rpy_offset[1], rpy_offset[2]).repeat((self.num_envs, 1))
 
@@ -450,46 +461,50 @@ class ElSpiderLidar(ElSpider): # 继承
     def create_warp_env(self):
         terrain_mesh = trimesh.Trimesh(vertices=self.terrain.vertices, faces=self.terrain.triangles)
         #save terrain mesh
-        transform = np.zeros((3,))
-        transform[0] = -self.terrain_cfg.border_size 
-        transform[1] = -self.terrain_cfg.border_size
-        transform[2] = 0.0
-        translation = trimesh.transformations.translation_matrix(transform)
-        terrain_mesh.apply_transform(translation)
+        # transform = np.zeros((3,))
+        # transform[0] = -self.terrain_cfg.border_size 
+        # transform[1] = -self.terrain_cfg.border_size
+        # transform[2] = 0.0
+        # translation = trimesh.transformations.translation_matrix(transform)
+        # terrain_mesh.apply_transform(translation)
 
-        current_script_dir = os.path.dirname(os.path.abspath(__file__))
+        # current_script_dir = os.path.dirname(os.path.abspath(__file__))
         
         
-        two_levels_up = os.path.dirname(os.path.dirname(os.path.dirname(current_script_dir)))
+        # two_levels_up = os.path.dirname(os.path.dirname(os.path.dirname(current_script_dir)))
         
         
-        obstacle_mesh_path = os.path.join(two_levels_up, "resources", "robots","el_mini", "robot_combined.stl")
+        # obstacle_mesh_path = os.path.join(two_levels_up, "resources", "robots","el_mini", "robot_combined.stl")
         
-        # obstacle_mesh = trimesh.load(obstacle_mesh_path)
-        obstacle_mesh = trimesh.load(obstacle_mesh_path, force='mesh')
+        # # obstacle_mesh = trimesh.load(obstacle_mesh_path)
+        # obstacle_mesh = trimesh.load(obstacle_mesh_path, force='mesh')
 
-        # trimesh.load may still return a Scene (e.g., OBJ/GLTF with multiple meshes)
-        if isinstance(obstacle_mesh, trimesh.Scene):
-            obstacle_mesh = trimesh.util.concatenate(
-                tuple(
-                    geom for geom in obstacle_mesh.geometry.values()
-                    if isinstance(geom, trimesh.Trimesh)
-                )
-            )
+        # # trimesh.load may still return a Scene (e.g., OBJ/GLTF with multiple meshes)
+        # if isinstance(obstacle_mesh, trimesh.Scene):
+        #     obstacle_mesh = trimesh.util.concatenate(
+        #         tuple(
+        #             geom for geom in obstacle_mesh.geometry.values()
+        #             if isinstance(geom, trimesh.Trimesh)
+        #         )
+        #     )
 
 
-            #obstacle_mesh = trimesh.load(self.terrain_cfg.obstacle_config.obstacle_root_path+"/human/meshes/Male.OBJ")
-        transaltion = np.zeros((3,))
-        transaltion[0]=self.root_states[0,0]
-        transaltion[1]=self.root_states[0,1]
-        transaltion[2]=self.root_states[0,2]
-        # quat = self.root_states[0,3:7].numpy()
-        # rotation = trimesh.transformations.quaternion_matrix(quat)
-        translation = trimesh.transformations.translation_matrix(transaltion)
+        #     #obstacle_mesh = trimesh.load(self.terrain_cfg.obstacle_config.obstacle_root_path+"/human/meshes/Male.OBJ")
+        # transaltion = np.zeros((3,))
+        # transaltion[0]=self.root_states[0,0]
+        # transaltion[1]=self.root_states[0,1]
+        # transaltion[2]=self.root_states[0,2]
+        # # quat = self.root_states[0,3:7].numpy()
+        # # rotation = trimesh.transformations.quaternion_matrix(quat)
+        # translation = trimesh.transformations.translation_matrix(transaltion)
             
-        obstacle_mesh.apply_transform(translation)
+        # obstacle_mesh.apply_transform(translation)
 
-        combine_mesh = trimesh.util.concatenate([terrain_mesh, obstacle_mesh])
+        # combine_mesh = trimesh.util.concatenate([terrain_mesh, obstacle_mesh])
+
+        # 机身不遮挡雷达
+        combine_mesh = terrain_mesh
+
         #save combined mesh
         #combine_mesh.export("robot_terrain_combined.stl")
         vertices = combine_mesh.vertices
@@ -540,11 +555,10 @@ class ElSpiderLidar(ElSpider): # 继承
         self.sensor_quat_tensor = torch.zeros_like(self.root_states[:, 3:7])
         
         # 传感器相对于载体的安装偏移
-        offset_pos = getattr(self.cfg.LidarConfig, "lidar_offset_pos", None)
+        offset_pos = getattr(self.cfg.LidarConfig, "sensor_offset_pos", None)
         if offset_pos is None:
             offset_pos = [0.0, 0.0, 0.35]
-
-        offset_rpy = getattr(self.cfg.LidarConfig, "lidar_offset_rpy", None)
+        offset_rpy = getattr(self.cfg.LidarConfig, "sensor_offset_rpy", None)
         if offset_rpy is None:
             offset_rpy = [0.0, 0.0, 0.0]
 
@@ -777,6 +791,10 @@ class ElSpiderLidar(ElSpider): # 继承
     # 每物理步后，为后续奖励与观测提供最新数据
     def _post_physics_step_callback(self):
         super()._post_physics_step_callback()
+        # print(f"速度: {self.base_lin_vel[0,0]:.2f}, {self.base_lin_vel[0,1]:.2f}, {self.base_lin_vel[0,2]:.2f} | 最小障碍距离: {self.min_obstacle_dist[0]:.2f}")
+        # for i in range(self.num_envs):
+        #     print(f"命令{i}: lin_vel_x:{self.commands[i,0]:.2f}, lin_vel_y:{self.commands[i,1]:.2f}, ang_vel_yaw-:{self.commands[i,2]:.2f}, heading:{self.commands[i,3]:.2f}")
+        # print(f"命令: lin_vel_x:{self.commands[0,0]:.2f}, lin_vel_y:{self.commands[0,1]:.2f}, ang_vel_yaw:{self.commands[0,2]:.2f}, heading:{self.commands[0,3]:.2f}")
 
         self.episode_length_buf += 1
         self.common_step_counter += 1
@@ -787,27 +805,50 @@ class ElSpiderLidar(ElSpider): # 继承
         self._update_lidar_pose()
         if self.lidar_update_counter % self.lidar_update_interval == 0:
             self.sensor_points_tensor, self.sensor_dist_tensor = self.sensor.update()
+            # print(f"self.sensor_points_tensor shape: {self.sensor_points_tensor.shape}, self.sensor_dist_tensor shape: {self.sensor_dist_tensor.shape}")
             # Reshape data: (num_envs, num_sensors, v_lines, h_lines, 3) -> (num_envs, total_rays, 3)
             total_rays = self.sensor_cfg.horizontal_line_num * self.sensor_cfg.vertical_line_num
-            self.lidar_points_buf[:] = self.sensor_points_tensor.view(self.num_envs, -1, 3)[:, :total_rays, :]
-            self.lidar_dist_buf[:] = self.sensor_dist_tensor.view(self.num_envs, -1)[:, :total_rays]
+            # 远点采样
+            # self.downsampled_cloud, self.downsampled_dist = farthest_point_sampling(
+            #     self.sensor_points_tensor.view(self.num_envs, 1, self.sensor_points_tensor.shape[2], 3),
+            #     dist_tensor=self.sensor_dist_tensor.view(self.num_envs, 1, self.sensor_points_tensor.shape[2]),
+            #     sample_size=total_rays
+            # )
+            # self.lidar_points_buf[:] = self.downsampled_cloud.view(self.num_envs, -1, 3)
+            # self.lidar_dist_buf[:] = self.downsampled_dist.view(self.num_envs, -1)
+            
+            # 旧版
+            # self.lidar_points_buf[:] = self.sensor_points_tensor.view(self.num_envs, -1, 3)[:, :total_rays, :]
+            # self.lidar_dist_buf[:] = self.sensor_dist_tensor.view(self.num_envs, -1)[:, :total_rays]
+
+            # 新版
+            # self.lidar_points_buf[:] = self.sensor_points_tensor.view(self.num_envs, -1, 3)
+            # self.lidar_dist_buf[:] = self.sensor_dist_tensor.view(self.num_envs, -1)
+
         self.lidar_update_counter += 1
 
         # Compute minimum obstacle distance
-        valid_mask = self.lidar_dist_buf < self.sensor_cfg.max_range
+        valid_mask = self.sensor_dist_tensor.view(self.num_envs, -1) < self.sensor_cfg.max_range
         self.min_obstacle_dist[:] = self.sensor_cfg.max_range
         for i in range(self.num_envs):
-            valid_dists = self.lidar_dist_buf[i][valid_mask[i]]
+            valid_dists = self.sensor_dist_tensor.view(self.num_envs, -1)[i][valid_mask[i]]
             if valid_dists.numel() > 0:
                 self.min_obstacle_dist[i] = valid_dists.min()
 
-        sphere_points = cart2sphere(self.lidar_points_buf.view(-1, 3)).view(self.num_envs, -1, 3)
+            # 判断全零
+            # all_zero = torch.all(self.lidar_dist_buf[i].abs() <= 1e-6)
+            # if all_zero:
+            #     print(f"Env {i}: all lidar distances are 0")
+
+        sphere_points = cart2sphere(self.sensor_points_tensor.view(self.num_envs, -1, 3)).view(self.num_envs, -1, 3)
         downsampled = downsample_spherical_points_vectorized(
             sphere_points, self.num_theta_bins, self.num_phi_bins
         )
         
-        # Use normalized distance as observation (0 = close, 1 = far/no hit)
-        self.lidar_obs_buf[:] = downsampled[:, :, 0].clamp(0, self.sensor_cfg.max_range) / self.sensor_cfg.max_range
+        # Use normalized distance as observation (0 = close, 1 = far/no hit) 左侧形状和右侧相同
+        downsampled[:, :, 0] = downsampled[:, :, 0].clamp(0, self.sensor_cfg.max_range) / self.sensor_cfg.max_range
+        self.lidar_obs_buf[:] = torch.cat((downsampled[:, :, 0], downsampled[:, :, 1], downsampled[:, :, 2]), dim=-1).view(self.num_envs, -1)
+        # self.lidar_obs_buf[:] = downsampled[:, :, 0].clamp(0, self.sensor_cfg.max_range) / self.sensor_cfg.max_range
 
     def check_termination(self):
         """Check termination conditions including collision detection."""
@@ -817,7 +858,7 @@ class ElSpiderLidar(ElSpider): # 继承
         if hasattr(self.cfg.rewards, 'collision_threshold'):
             collision_threshold = self.cfg.rewards.collision_threshold
         else:
-            collision_threshold = 0.08  # Default 8cm - more permissive
+            collision_threshold = 0.4  # Default 0.08m - more permissive
         
         # Get protection steps (grace period during early training)
         # if hasattr(self.cfg.rewards, 'collision_termination_after_steps'):

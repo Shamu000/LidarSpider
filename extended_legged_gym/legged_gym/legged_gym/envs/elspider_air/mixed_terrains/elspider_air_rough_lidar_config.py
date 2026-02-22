@@ -12,7 +12,7 @@ from abc import ABC, abstractmethod
 class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
     class env(ElSpiderAirRoughTrainCfg.env):
         # Update observation space for raycast data
-        num_observations = 66 + 96  # MID360
+        num_observations = 66 + 192*3  # MID360
         # num_observations = 66 # 无雷达
 
     class terrain(ElSpiderAirRoughTrainCfg.terrain):
@@ -20,7 +20,7 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
         # path to the terrain file
         terrain_file = None
 
-        mesh_type = 'confined_trimesh'  # "heightfield" # none, plane, heightfield or trimesh
+        mesh_type = 'plane'  # "heightfield" # none, plane, heightfield or trimesh or confined_trimesh
         horizontal_scale = 0.1  # [m]
         vertical_scale = 0.005  # [m]
         border_size = 10  # [m]
@@ -95,7 +95,7 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
         gap_size = [0.02, 0.1]
         stepping_stone_distance = [0.02, 0.08]
         downsampled_scale = 0.075
-        curriculum = False
+        curriculum = True
 
         all_vertical = False
         no_flat = True
@@ -111,7 +111,7 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
         selected = False # select a unique terrain type and pass all arguments
         terrain_kwargs = None # Dict of arguments for selected terrain
         max_init_terrain_level = 5 # starting curriculum state
-        max_difficulty = True
+        max_difficulty = False
         terrain_length = 18.
         terrain_width = 18
         num_rows= 2 # number of terrain rows (levels)  # spreaded is benifitiall !
@@ -183,15 +183,15 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
         
         # Core sensor settings
         sensor_type: "ElSpiderAirRoughLidarCfg.LidarType" = field(
-            default_factory=lambda: ElSpiderAirRoughLidarCfg.LidarType.AVIA
+            default_factory=lambda: ElSpiderAirRoughLidarCfg.LidarType.MID360
         )
         num_sensors: int = 1
         dt: float = 0.02  # simulation time step
         update_frequency: float = 50.0  # sensor update rate in Hz
 
         # 雷达初始姿态
-        sensor_offset_pos: list = field(default_factory=lambda: [0.10, 0.0, 0.35])  # [x, y, z] in meters
-        lidar_offset_rpy: list = field(default_factory=lambda: [0.0, 0.0, 0.0])  # [roll, pitch, yaw] in degrees
+        sensor_offset_pos: list = field(default_factory=lambda: [0.3, 0.0, 0.35])  # [x, y, z] in meters
+        sensor_offset_rpy: list = field(default_factory=lambda: [0.0, 0.0, 0.0])  # [roll, pitch, yaw] in degrees
         
         # Range settings
         max_range: float = 50.0
@@ -306,8 +306,8 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
         heading_command = False  # if true: compute ang vel command from heading error
 
         class ranges:
-            lin_vel_x = [-1.0, 1.0]  # min max [m/s]
-            lin_vel_y = [-0.5, 0.5]   # min max [m/s]
+            lin_vel_x = [-2.0, 2.0]  # min max [m/s]
+            lin_vel_y = [-1.0, 1.0]   # min max [m/s]
             ang_vel_yaw = [-0.6, 0.6]    # min max [rad/s]
             heading = [-3.14, 3.14]
 

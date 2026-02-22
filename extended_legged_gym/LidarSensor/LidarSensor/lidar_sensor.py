@@ -79,7 +79,7 @@ class LidarSensor(BaseSensor):
             self._setup_height_scanner_parameters()
             self.ray_generator = None
         elif self.sensor_cfg.is_livox_sensor:
-            self.ray_generator = LivoxGenerator(sensor_type_str)
+            self.ray_generator = LivoxGenerator(sensor_type_str, self.sensor_cfg)
             # For Livox sensors, dimensions will be set in initialize_ray_vectors
             self.num_vertical_lines = 1  # Temporary value, will be updated
             self.num_horizontal_lines = 1  # Temporary value, will be updated
@@ -151,8 +151,6 @@ class LidarSensor(BaseSensor):
         else:
             self._initialize_pattern_rays()
             
-        print(f"Ray vectors initialized for {self.sensor_cfg.sensor_type.value} "
-              f"with shape ({self.num_vertical_lines}, {self.num_horizontal_lines})")
 
     def _initialize_grid_rays(self):
         """Initialize ray vectors for simple grid-based lidar"""
@@ -422,7 +420,7 @@ class LidarSensor(BaseSensor):
             requires_grad=False,
         )
         
-        # Convert to warp tensors
+        # 从torch转换为warp张量
         self.local_dist = wp.from_torch(self.lidar_dist_tensor, dtype=wp.float32)
         self.lidar_pixels_tensor = torch.zeros_like(self.lidar_tensor, device=self.device)
         self.lidar_warp_tensor = wp.from_torch(self.lidar_tensor, dtype=wp.vec3)
@@ -457,6 +455,7 @@ class LidarSensor(BaseSensor):
         return None  # not contiguous
     def reset(self, env_ids=None, value=0.0):
         """Reset selected environments (or all) in lidar_warp_tensor"""
+        # fill_函数：全部填充为value的值
         if env_ids is None:
             self.lidar_warp_tensor.fill_(value)
             return
@@ -537,7 +536,7 @@ class LidarSensor(BaseSensor):
             else:
                 # Use regular kernel for other sensor types
                 wp.launch(
-                    kernel=LidarWarpKernels.draw_optimized_kernel_pointcloud,
+                    kernel=LidarWarpKernels.draw_optimized_kernel_pointcloud, # 距离赋值函数
                     dim=(
                         self.num_envs,
                         self.num_sensors,
@@ -560,5 +559,4 @@ class LidarSensor(BaseSensor):
         # Convert results back to torch tensors
         self.lidar_pixels_tensor = wp.to_torch(self.lidar_warp_tensor) # shape: (num_envs, num_sensors, num_vertical_lines, num_horizontal_lines, 3)
         self.lidar_dist_tensor = wp.to_torch(self.local_dist) # shape: (num_envs, num_sensors, num_vertical_lines, num_horizontal_lines)
-        
         return self.lidar_pixels_tensor, self.lidar_dist_tensor 
