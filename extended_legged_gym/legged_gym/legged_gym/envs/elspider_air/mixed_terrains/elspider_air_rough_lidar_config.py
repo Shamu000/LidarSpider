@@ -48,6 +48,25 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
         # trimesh only:
         slope_treshold = 0.75  # slopes above this threshold will be corrected to vertical surfaces
 
+    class sim:
+        dt = 0.005
+        substeps = 1
+        gravity = [0., 0., -9.81]  # [m/s^2]
+        up_axis = 1  # 0 is y, 1 is z
+
+        class physx:
+            num_threads = 10
+            solver_type = 1  # 0: pgs, 1: tgs
+            num_position_iterations = 4
+            num_velocity_iterations = 0
+            contact_offset = 0.01  # [m]
+            rest_offset = 0.0   # [m]
+            bounce_threshold_velocity = 0.5  # 0.5 [m/s]
+            max_depenetration_velocity = 1.0
+            max_gpu_contact_pairs = 2**23  # 2**24 -> needed for 8000 envs and more
+            default_buffer_size_multiplier = 5
+            contact_collection = 2  # 0: never, 1: last sub-step, 2: all sub-steps (default=2)
+
     class BaseConfig:
         def __init__(self) -> None:
             """ Initializes all member classes recursively. Ignores all namse starting with '__' (buit-in methods)."""
@@ -312,14 +331,14 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
             heading = [-3.14, 3.14]
 
     class rewards(ElSpiderAirRoughTrainCfg.rewards):
-        base_height_target = 0.35
+        base_height_target = 0.28
         max_contact_force = 500.
         only_positive_rewards = True
 
         # Obstacle avoidance parameters
-        # safe_obstacle_dist = 0.5    # Distance considered safe (meters)
-        # danger_obstacle_dist = 0.2  # Distance considered dangerous (meters)
-        collision_threshold = 0.08  # Distance for collision termination (meters) - reduced from 0.15
+        safe_obstacle_dist = 0.5    # Distance considered safe (meters)
+        danger_obstacle_dist = 0.3  # Distance considered dangerous (meters)
+        collision_threshold = 0.4  # Distance for collision termination (meters) - reduced from 0.15
         
         # Termination protection - disable collision termination during early training steps
         # collision_termination_after_steps = 10  # Only terminate after this many steps
@@ -329,7 +348,7 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
         multi_stage_rewards = True  # if true, reward scales should be list
         reward_stage_threshold = 5.0
         # Stage0-1: plane, Stage2: curriculum
-        reward_min_stage = 2  # Start from 0
+        reward_min_stage = 0  # Start from 0
         reward_max_stage = 2
 
         class scales():
@@ -337,17 +356,20 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
             # Tracking rewards
             tracking_lin_vel = 1.0
             tracking_ang_vel = 0.5
+            foot_acc = [0.1, 0.2, 0.3]
+            obstacle_avoidance = [1., 1., 1.]
             # Base penalties
-            lin_vel_z = -2.0
+            lin_vel_z = [-0.5, -1.0, -2.0]
             ang_vel_xy = -0.05
-            orientation = [-5.0, -5.0, 0.0]
-            base_height = [-8.0, -8.0, 0.0]
+            orientation = [0.0, 0.0, 0.0] # 原-5，有待商榷
+            base_height = [-10.0, -10.0, 0.0]
             # DOF penalties
-            torques = -0.00001
             dof_vel = -0.
             dof_acc = [-5e-8, -5e-8, -5e-8]
             dof_pos_limits = -1.0
+            dof_power = -2.e-4
             action_rate = [-0.001, -0.001, -0.002]
+            action_smoothness = -0.01
             # Feet penalties
             feet_slip = [-0.0, -0.4]  # Before feet_air_time
             feet_air_time = [0.8, 1.5]
@@ -361,6 +383,7 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
             # Gait
             async_gait_scheduler = [-0.2, -0.2, -0.1]
             gait_2_step = [-5.0, -5.0, -2.0]
+            foot_clearance = 0.5
 
         class async_gait_scheduler:
             # Reward for the async gait scheduler

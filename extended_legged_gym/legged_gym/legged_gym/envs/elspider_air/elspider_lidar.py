@@ -74,13 +74,28 @@ def quat_from_euler_xyz(roll, pitch, yaw): # 欧拉角转四元数
 @torch.jit.script
 def cart2sphere(cart): # 笛卡尔坐标系转球面坐标系
     epsilon = 1e-9
-    x = cart[:, 0]
-    y = cart[:, 1]
-    z = cart[:, 2]
-    r = torch.norm(cart, dim=1)
+    x = cart[:, :, 0]
+    y = cart[:, :, 1]
+    z = cart[:, :, 2]
+    r = torch.norm(cart, dim=-1) # 沿着最后一维的xyz计算
     theta = torch.atan2(y, x)
     phi = torch.asin(z / (r + epsilon))
     return torch.stack((r, theta, phi), dim=-1)
+
+@torch.jit.script
+def sphere2cart(sphere):
+    r     = sphere[:, :, 0]
+    theta = sphere[:, :, 1]
+    phi   = sphere[:, :, 2]
+
+    sin_phi = torch.sin(phi)
+    cos_phi = torch.cos(phi)
+
+    x = r * cos_phi * torch.cos(theta)
+    y = r * cos_phi * torch.sin(theta)
+    z = r * sin_phi
+
+    return torch.stack((x, y, z), dim=-1)
 
 # extended_legged_gym/legged_gym/legged_gym/envs/base/legged_robot_config.py/250
 class sim:  # 仿真参数 
@@ -212,7 +227,7 @@ def downsample_spherical_points_vectorized(sphere_points, num_theta_bins=10, num
     
     # Define bin ranges
     theta_min, theta_max = -3.14, 3.14
-    phi_min, phi_max = -0.12, 0.907
+    phi_min, phi_max = -0.12, 0.908
     
     # Extract r, theta, phi for all environments
     r = sphere_points[:, :, 0]       # [num_envs, num_points]
@@ -796,9 +811,6 @@ class ElSpiderLidar(ElSpider): # 继承
         #     print(f"命令{i}: lin_vel_x:{self.commands[i,0]:.2f}, lin_vel_y:{self.commands[i,1]:.2f}, ang_vel_yaw-:{self.commands[i,2]:.2f}, heading:{self.commands[i,3]:.2f}")
         # print(f"命令: lin_vel_x:{self.commands[0,0]:.2f}, lin_vel_y:{self.commands[0,1]:.2f}, ang_vel_yaw:{self.commands[0,2]:.2f}, heading:{self.commands[0,3]:.2f}")
 
-        self.episode_length_buf += 1
-        self.common_step_counter += 1
-
         if self.sensor is None:
             return
 
@@ -821,10 +833,6 @@ class ElSpiderLidar(ElSpider): # 继承
             # self.lidar_points_buf[:] = self.sensor_points_tensor.view(self.num_envs, -1, 3)[:, :total_rays, :]
             # self.lidar_dist_buf[:] = self.sensor_dist_tensor.view(self.num_envs, -1)[:, :total_rays]
 
-            # 新版
-            # self.lidar_points_buf[:] = self.sensor_points_tensor.view(self.num_envs, -1, 3)
-            # self.lidar_dist_buf[:] = self.sensor_dist_tensor.view(self.num_envs, -1)
-
         self.lidar_update_counter += 1
 
         # Compute minimum obstacle distance
@@ -832,18 +840,37 @@ class ElSpiderLidar(ElSpider): # 继承
         self.min_obstacle_dist[:] = self.sensor_cfg.max_range
         for i in range(self.num_envs):
             valid_dists = self.sensor_dist_tensor.view(self.num_envs, -1)[i][valid_mask[i]]
-            if valid_dists.numel() > 0:
-                self.min_obstacle_dist[i] = valid_dists.min()
+            positive_dists = valid_dists[valid_dists > 0]
+            if positive_dists.numel() > 0:
+                self.min_obstacle_dist[i] = positive_dists.min()
+            else:
+                self.min_obstacle_dist[i] = 0.0
 
-            # 判断全零
-            # all_zero = torch.all(self.lidar_dist_buf[i].abs() <= 1e-6)
-            # if all_zero:
-            #     print(f"Env {i}: all lidar distances are 0")
+            # if valid_dists.numel() > 0:
+            #     self.min_obstacle_dist[i] = valid_dists.min()
 
         sphere_points = cart2sphere(self.sensor_points_tensor.view(self.num_envs, -1, 3)).view(self.num_envs, -1, 3)
+        lidar_downsampled_points = downsample_spherical_points_vectorized(
+            sphere_points, 100, 20
+        )
+
+
+        # for env_idx in range(self.num_envs):
+        #     all_zero_r = torch.all(self.sensor_dist_tensor[env_idx, :].abs() <= 1e-6)
+        #     if all_zero_r:
+        #         print(f"Env {env_idx}: lidar_downsampled_points r are all ~0")
+        
+        self.lidar_points_buf[:] = sphere2cart(lidar_downsampled_points.view(self.num_envs, -1, 3)).view(self.num_envs, -1, 3)
+        self.lidar_dist_buf[:] = lidar_downsampled_points[:, :, 0].view(self.num_envs, -1)
         downsampled = downsample_spherical_points_vectorized(
             sphere_points, self.num_theta_bins, self.num_phi_bins
         )
+
+        # for i in range(self.num_envs):
+        #     # 判断全零
+        #     all_zero = torch.all(self.sensor_dist_tensor[i].abs() <= 1e-6)
+        #     if all_zero:
+        #         print(f"Env {i}: all lidar distances are 0")            
         
         # Use normalized distance as observation (0 = close, 1 = far/no hit) 左侧形状和右侧相同
         downsampled[:, :, 0] = downsampled[:, :, 0].clamp(0, self.sensor_cfg.max_range) / self.sensor_cfg.max_range
@@ -947,26 +974,30 @@ class ElSpiderLidar(ElSpider): # 继承
         # Penalize base height away from target
         base_height = torch.mean(self.base_pos[:, 2].unsqueeze(
             1) - self.measured_heights, dim=1)
-        # print(f"base height: {base_height}")
         rew = torch.square(base_height - self.cfg.rewards.base_height_target)
+        # print(f"base height: {base_height}, reward: {rew}")
         return rew
     
     def _reward_dof_power(self):
         # Penalize power consumption
         return torch.sum(torch.abs(self.torques * self.dof_vel), dim=1)
-
+    
+    def _reward_action_rate(self):
+        # Penalize changes in actions
+        return torch.sum(torch.square(self.last_actions - self.actions), dim=1)
+    
     def _reward_action_smoothness(self):
         '''Penalize action smoothness'''
         action_smoothness_cost = torch.sum(torch.square(
             self.actions - 2*self.last_actions + self.llast_actions), dim=-1)
         return action_smoothness_cost
 
-    # def _reward_tracking_lin_vel(self):
-    #     # Tracking of linear velocity commands (xy axes)
-    #     lin_vel_error = torch.sum(torch.square(self.commands[:, :2] - self.base_lin_vel[:, :2]), dim=1)
-    #     return torch.exp(-lin_vel_error/self.cfg.rewards.tracking_sigma)
+    def _reward_tracking_lin_vel(self):
+        # Tracking of linear velocity commands (xy axes)
+        lin_vel_error = torch.sum(torch.square(self.commands[:, :2] - self.base_lin_vel[:, :2]), dim=1)
+        return torch.exp(-lin_vel_error/self.cfg.rewards.tracking_sigma)
 
-    # def _reward_tracking_ang_vel(self):
+    def _reward_tracking_ang_vel(self):
         # Tracking of angular velocity commands (yaw)
         ang_vel_error = torch.square(self.commands[:, 2] - self.base_ang_vel[:, 2])
         return torch.exp(-ang_vel_error/self.cfg.rewards.tracking_sigma)
@@ -987,19 +1018,19 @@ class ElSpiderLidar(ElSpider): # 继承
     #     # Penalize motion at zero commands
     #     return torch.sum(torch.abs(self.dof_vel), dim=1) * (torch.norm(self.commands[:, :3], dim=1) < 0.1)
 
-    # def _reward_dof_pos_stand_still(self):
-    #     # Penalize position deviation at zero commands
-    #     return torch.sum(torch.square(self.dof_pos - self.default_dof_pos), dim=1) * (torch.norm(self.commands[:, :3], dim=1) < 0.1)
+    # # def _reward_dof_pos_stand_still(self):
+    # #     # Penalize position deviation at zero commands
+    # #     return torch.sum(torch.square(self.dof_pos - self.default_dof_pos), dim=1) * (torch.norm(self.commands[:, :3], dim=1) < 0.1)
     
-    # def _reward_feet_contact_stand_still(self):
-    #     # Encourage feet contact with the ground at zero commands
-    #     contacts = self.link_contact_forces[:, self.feet_contact_indices, 2] > 0.1
-    #     full_contact = torch.sum(1.*contacts, dim=1)==len(self.feet_contact_indices)
-    #     return 1.0*full_contact * (torch.norm(self.commands[:, :3], dim=1) < 0.1)
+    # # def _reward_feet_contact_stand_still(self):
+    # #     # Encourage feet contact with the ground at zero commands
+    # #     contacts = self.link_contact_forces[:, self.feet_contact_indices, 2] > 0.1
+    # #     full_contact = torch.sum(1.*contacts, dim=1)==len(self.feet_contact_indices)
+    # #     return 1.0*full_contact * (torch.norm(self.commands[:, :3], dim=1) < 0.1)
     
-    # def _reward_dof_close_to_default(self):
-        # Penalize dof position deviation from default
-        return torch.sum(torch.square(self.dof_pos - self.default_dof_pos), dim=1)
+    # # def _reward_dof_close_to_default(self):
+    #     # Penalize dof position deviation from default
+    #     return torch.sum(torch.square(self.dof_pos - self.default_dof_pos), dim=1)
 
     def _reward_foot_clearance(self):
         """
@@ -1033,14 +1064,26 @@ class ElSpiderLidar(ElSpider): # 继承
         dist_reward = torch.clamp(self.min_obstacle_dist / safe_dist, 0, 1)
         return dist_reward
 
-    def _reward_collision_penalty(self):
+    def _reward_collision(self):
         """Penalty for getting too close to obstacles."""
         danger_dist = getattr(self.cfg.rewards, 'danger_obstacle_dist', 0.3)
         
         # Exponential penalty for being too close
         penalty = torch.exp(-self.min_obstacle_dist / danger_dist + 1) - 1
         penalty = torch.clamp(penalty, 0, 10)
-        return -penalty
+        return penalty
+    
+    def _reward_dof_pos_limits(self):
+        # Penalize dof positions too close to the limit
+        out_of_limits = -(self.dof_pos - self.dof_pos_limits[:, 0]).clip(max=0.)  # lower limit
+        out_of_limits += (self.dof_pos - self.dof_pos_limits[:, 1]).clip(min=0.)
+        return torch.sum(out_of_limits, dim=1)
+    
+    def _reward_lin_vel_z(self):
+        # Penalize z axis base linear velocity
+        return torch.square(self.base_lin_vel[:, 2])
+    
+
 
     # def _reward_exploration(self):
     #     """Reward for exploring while avoiding obstacles."""

@@ -13,6 +13,10 @@ python3 ./extended_legged_gym/legged_gym/legged_gym/scripts/train.py --task=elsp
 
 python3 ./extended_legged_gym/legged_gym/legged_gym/scripts/train.py --task=elspider_air_rough_lidar --num_envs=4 --max_iterations=100
 
+python3 ./extended_legged_gym/legged_gym/legged_gym/scripts/train.py --task=elspider_air_rough_lidar --num_envs=4 --max_iterations=100 --resume --load_run v1 --checkpoint -1
+
+python3 ./extended_legged_gym/legged_gym/legged_gym/scripts/train.py --task=elspider_air_rough_lidar --num_envs=1000 --max_iterations=1000 --headless
+
 ```
 
 # 3.测试
@@ -20,7 +24,7 @@ python3 ./extended_legged_gym/legged_gym/legged_gym/scripts/train.py --task=elsp
 python3 ./extended_legged_gym/legged_gym/legged_gym/scripts/play.py \
         --task elspider_air_rough_lidar \
         --num_envs 1 \
-        --load_run Feb19_20-47-13_ \
+        --load_run v1 \
         --checkpoint -1
 ```
 
@@ -61,3 +65,7 @@ python3 /home/hithcat/Code/DaChuang/final/OmniPerception/extended_legged_gym/leg
     --max_iterations 10
 ```
 
+# Tensorboard
+```
+tensorboard --logdir /home/hithcat/Code/DaChuang/LidarSpider/extended_legged_gym/legged_gym/logs/elspider_air_rough_lidar/v1
+```

@@ -31,7 +31,6 @@ class LeggedRobotRewMixin:
     def update_reward_scales(self, mean_reward):
         if mean_reward > self.cfg.rewards.reward_stage_threshold and \
                 self.reward_scales_stage < self.cfg.rewards.reward_max_stage:
-            self.reward_scales_stage += 1
             self.reward_scales = self._get_reward_scales(self.reward_scales_stage)
             self._prepare_reward_function()
             return True
