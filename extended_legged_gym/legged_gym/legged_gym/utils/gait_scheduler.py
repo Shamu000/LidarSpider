@@ -106,7 +106,7 @@ class AsyncGaitSchedulerCfg(object):
                       ['LF_HFE', 'LB_HFE', 'RM_HFE'],
                       ['RF_KFE', 'RB_KFE', 'LM_KFE'],
                       ['LF_KFE', 'LB_KFE', 'RM_KFE'],]
-    dof_nominal_pos = [0.0, 1.0, 1.0]*6  # HAA, HFE, KFE
+    dof_nominal_pos = [0.0, 0.6, 0.6]*6  # HAA, HFE, KFE
     dof_nominal_pos_weight = [1.0, 1.0, 3.0]*6  # HAA, HFE, KFE
 
     foot_names = ['LB_FOOT', 'LF_FOOT', 'LM_FOOT', 'RB_FOOT', 'RF_FOOT', 'RM_FOOT']
@@ -149,6 +149,7 @@ class AsyncGaitScheduler(object):
         self.gait_cfg = gait_cfg
 
     def reward_dof_align(self):
+        # 对角对称
         reward = torch.zeros(self.num_envs, device=self.device, dtype=torch.float)
         for dof_set_idx in self.gait_cfg.dof_align_sets_idx:
             sel_dof_pos = self.dof_pos[:, dof_set_idx]
@@ -156,6 +157,7 @@ class AsyncGaitScheduler(object):
         return reward
 
     def reward_dof_nominal_pos(self):
+        # 回到参考姿态
         dof_nomianl_pos_mat = torch.tensor(self.gait_cfg.dof_nominal_pos,
                                            device=self.device, dtype=torch.float).repeat(self.num_envs, 1)
         dof_err = torch.square(self.dof_pos - dof_nomianl_pos_mat)

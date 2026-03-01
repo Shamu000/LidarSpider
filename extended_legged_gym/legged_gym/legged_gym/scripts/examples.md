@@ -15,7 +15,7 @@ python3 ./extended_legged_gym/legged_gym/legged_gym/scripts/train.py --task=elsp
 
 python3 ./extended_legged_gym/legged_gym/legged_gym/scripts/train.py --task=elspider_air_rough_lidar --num_envs=4 --max_iterations=100 --resume --load_run v1 --checkpoint -1
 
-python3 ./extended_legged_gym/legged_gym/legged_gym/scripts/train.py --task=elspider_air_rough_lidar --num_envs=1000 --max_iterations=1000 --headless
+python3 ./extended_legged_gym/legged_gym/legged_gym/scripts/train.py --task=elspider_air_rough_lidar --num_envs=1000 --max_iterations=300 --headless
 
 ```
 

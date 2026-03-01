@@ -12,9 +12,9 @@ from abc import ABC, abstractmethod
 class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
     class env(ElSpiderAirRoughTrainCfg.env):
         # Update observation space for raycast data
-        num_observations = 253 + 192*3  # MID360
+        num_observations = 66 + 192*3  # MID360
         # num_observations = 66 # 无雷达
-        episode_length_s = 10
+        episode_length_s = 5
 
     class terrain(ElSpiderAirRoughTrainCfg.terrain):
         use_terrain_obj = False  # use TerrainObj class to create terrain
@@ -25,20 +25,20 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
         horizontal_scale = 0.1  # [m]
         vertical_scale = 0.005  # [m]
         border_size = 10  # [m]
-        curriculum = True
+        curriculum = False
         static_friction = 1.0
         dynamic_friction = 1.0
         restitution = 0.
         # rough terrain only:
-        measure_heights = True # 若为true，则要给obs_buf加187维
+        measure_heights = False
         measured_points_x = [-0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1,
                              0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]  # 1mx1.6m rectangle (without center line)
         measured_points_y = [-0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4, 0.5]
         selected = False  # select a unique terrain type and pass all arguments
         terrain_kwargs = None  # Dict of arguments for selected terrain
         max_init_terrain_level =0  # starting curriculum state
-        terrain_length = 4.
-        terrain_width = 4.
+        terrain_length = 6.
+        terrain_width = 6.
         num_rows = 4  # number of terrain rows (levels)
         num_cols = 6  # number of terrain cols (types)
         difficulty_scale = 1.0  # Scale for difficulty in curriculum
@@ -163,6 +163,17 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
         slope_treshold = 1.5# slopes above this threshold will be corrected to vertical surfaces
         origin_zero_z = True
         num_sub_terrains = num_rows * num_cols
+
+    class noise:
+        add_noise = False
+        noise_level = 1.0 # scales other values
+        class noise_scales:
+            dof_pos = 0.01
+            dof_vel = 0.5
+            lin_vel = 0.1
+            ang_vel = 0.2
+            gravity = 0.05
+            height_measurements = 0.1
 
     class LidarType(Enum):
         """Standardized lidar sensor types"""
@@ -304,7 +315,7 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
             ]
 
     class init_state(ElSpiderAirRoughTrainCfg.init_state):
-        pos = [0.0, 0.0, 0.4]  # x,y,z [m]
+        pos = [0.0, 0.0, 0.45]  # x,y,z [m]
         default_joint_angles = {  # = target angles [rad] when action = 0.0
             "RF_HAA": 0.0,
             "RM_HAA": 0.0,
@@ -339,10 +350,10 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
         heading_command = False  # if true: compute ang vel command from heading error
 
         class ranges:
-            lin_vel_x = [-1.0, 1.0]  # min max [m/s]
-            lin_vel_y = [-1.0, 1.0]   # min max [m/s]
-            ang_vel_yaw = [-1, 1]    # min max [rad/s]
-            heading = [-3.14, 3.14]
+            lin_vel_x = [-0., 0.]  # min max [m/s]
+            lin_vel_y = [-0., 0.]   # min max [m/s]
+            ang_vel_yaw = [-0., 0.]    # min max [rad/s]
+            heading = [-0., 0.]
 
     class asset(ElSpiderAirRoughTrainCfg.asset):
         # Penalize body and joint contacts with the ground
@@ -351,9 +362,9 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
         self_collisions = 0 # 1 to disable, 0 to enable...bitwise filter
 
     class rewards(ElSpiderAirRoughTrainCfg.rewards):
-        base_height_target = 0.28
+        base_height_target = 0.35
         max_contact_force = 500.
-        only_positive_rewards = True
+        only_positive_rewards = False
 
         # Obstacle avoidance parameters
         safe_obstacle_dist = 0.5    # Distance considered safe (meters)
@@ -371,44 +382,45 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
         reward_min_stage = 0  # Start from 0
         reward_max_stage = 2
 
-        class scales(ElSpiderAirRoughTrainCfg.rewards.scales):
+        class scales():
+
             # Tracking rewards
-            tracking_lin_vel = 1.0
-            tracking_ang_vel = 0.5
+            tracking_lin_vel = 0 # 1.0
+            tracking_ang_vel = 0 # 0.5
             foot_acc = [0, 0, 0]
             obstacle_avoidance = [1., 1., 1.]
             # Base penalties
-            lin_vel_z = [-2.0, -2.5, -3.0]
+            lin_vel_z = [-0.5, -1.0, -2.0]
             ang_vel_xy = -0.05
-            orientation = -5.0
+            orientation = -1.e+2 # 原-5，有待商榷
             torques = -0.00001
-            base_height = [-8.0, -8.0, -8.0]
+            base_height = -8.0
             # DOF penalties
-            dof_vel = 0.
+            dof_vel = -1e-3
             dof_acc = -5e-8
             dof_pos_limits = -1.0
             # dof_power = -2.e-4
-            action_rate = [-0.001, -0.001, -0.001]
+            action_rate = [-0.001, -0.001, -0.002]
             action_smoothness = -0.01
             # Feet penalties
             feet_slip = [-0.0, -0.4]  #脚部打滑惩罚
             jump_air = 0
-            feet_air_time = 0.8
+            feet_air_time = -1.
             feet_stumble = -0.0 # 脚部碰到垂直面的惩罚
             # feet_stumble_liftup = [1.0, 1.0, 2.0] # 脚部碰到垂直面时向上抬起的奖励
             # feet_contact_forces = [-0.01, -0.05, -0.05]  # Avoid jumping
-            body_joint_contact = [-1.0, -2.0, -3.0] # 原collision
+            body_joint_contact = [-1.0, -2.0, -3.0]
             # Misc
             termination = -5.
-            collision = -2.5
-            stand_still = -0.
+            collision = -1.
+            stand_still = -1
             # dof_vel_stand_still = -1e-4
             # dof_pos_stand_still = -2e-2
-            # feet_contact_stand_still = -0.1
+            feet_contact_stand_still = -0.1
             # Gait
-            # async_gait_scheduler = [-5., -6, -7.]
-            gait_2_step = [-5.0, -5.0, -5.0]
-            # foot_clearance = 0.5
+            async_gait_scheduler = [-5., -6, -7.]
+            gait_2_step = [-10.0, -15.0, -20.0]
+            foot_clearance = 0.5
 
         class async_gait_scheduler:
             # Reward for the async gait scheduler
@@ -420,45 +432,48 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
         foot_height_offset = 0.0     # height of the foot coordinate origin above ground [m]
         foot_clearance_tracking_sigma = 0.01
 
-    class noise:
-        add_noise = False
-        noise_level = 1.0 # scales other values
-        class noise_scales:
-            dof_pos = 0.01
-            dof_vel = 0.5
-            lin_vel = 0.1
-            ang_vel = 0.2
-            gravity = 0.05
-            height_measurements = 0.1
+    # class viewer:
+    #     ref_env = 0
+    #     pos = [30, 0, -10]  # [m]
+    #     lookat = [0., 0, 0.]  # [m]
 
-class ElSpiderAirRoughLidarCfgPPO(ElSpiderAirRoughTrainCfgPPO):
+# class ElSpiderAirRoughLidarCfgPPO(ElSpiderAirRoughTrainCfgPPO):
+#     class runner(ElSpiderAirRoughTrainCfgPPO.runner):
+#         run_name = 'lidar512'
+#         experiment_name = 'rough_elspider_air'
+#         load_run = -1
+#         max_iterations = 5000  # number of policy updates
+
+#         multi_stage_rewards = True
+
+class ElSpiderAirRoughLidarCfgPPO(LeggedRobotCfgPPO):
     """PPO training configuration for ElSpider LiDAR confined space task."""
     
-    # class algorithm(ElSpiderAirRoughTrainCfgPPO.algorithm):
-        # entropy_coef = 0.01
-        # learning_rate = 1e-3
-        # num_learning_epochs = 5
-        # gamma = 0.99
-        # lam = 0.95
-        # num_mini_batches = 4
+    class algorithm(LeggedRobotCfgPPO.algorithm):
+        entropy_coef = 0.01
+        learning_rate = 1e-3
+        num_learning_epochs = 5
+        gamma = 0.99
+        lam = 0.95
+        num_mini_batches = 4
 
-    class policy(ElSpiderAirRoughTrainCfgPPO.policy):
+    class policy(LeggedRobotCfgPPO.policy):
         init_noise_std = 1.0
-        # actor_hidden_dims = [512, 256, 128]
-        # critic_hidden_dims = [512, 256, 128]
-        # activation = 'elu'
+        actor_hidden_dims = [512, 256, 128]
+        critic_hidden_dims = [512, 256, 128]
+        activation = 'elu'
 
-    class runner(ElSpiderAirRoughTrainCfgPPO.runner):
+    class runner(LeggedRobotCfgPPO.runner):
         run_name = ''
         experiment_name = 'elspider_air_rough_lidar' # 保存的log文件夹名称
         load_run = -1
-        max_iterations = 3000
+        max_iterations = 5000
         
         # Enable multi-stage rewards
         multi_stage_rewards = True
         
         # Checkpointing
-        save_interval = 50
+        save_interval = 100
         
         # Logging
         log_interval = 10

@@ -46,6 +46,7 @@ from legged_gym.utils import GaitScheduler, GaitSchedulerCfg, AsyncGaitScheduler
     SimpleRaibertPlannerConfig, SimpleRaibertPlanner, RaibertPlanner, RaibertPlannerConfig
 from legged_gym.utils.helpers import class_to_dict
 from legged_gym.utils.math_utils import quat_apply_yaw
+from legged_gym.utils.gym_visualizer import GymVisualizer
 
 # state和action对称变换，用于数据增强，加快训练，state是当前观测，action是希望当前执行的动作
 @torch.no_grad() # 强调该函数不需要梯度计算，节省内存
@@ -266,6 +267,7 @@ class ElSpider(LeggedRobot): # 继承
                                                        self.num_envs,
                                                        self.device,
                                                        cfg)
+        self.create_viewer()
 
     # 可视化中画箭头显示机器人的速度信息
     def _draw_debug_vis(self):
@@ -351,7 +353,27 @@ class ElSpider(LeggedRobot): # 继承
         super().check_termination()
         
         # Add new termination condition - terminate if robot is upside down (z-component of projected gravity > 0)
-        self.reset_buf |= (self.projected_gravity[:, 2] > 0) # 满足一个条件变重置环境
+        self.reset_buf |= (self.projected_gravity[:, 2] > 0) & (self.episode_length_buf > 24)
+        # print(f"Test:Upside_down termination: {(self.projected_gravity[:, 2] > 0) & (self.episode_length_buf > 10)}")
+
+    def create_viewer(self):
+        # create viewer
+        if self.headless == True:
+            self.viewer = None
+            print("Running in headless mode")
+        else:
+            self.debug_viz = True
+            self.viewer = self.gym.create_viewer(
+                self.sim, gymapi.CameraProperties())
+            if self.viewer is None:
+                print("*** Failed to create viewer")
+                quit()
+            self.gym.subscribe_viewer_keyboard_event(
+                self.viewer, gymapi.KEY_ESCAPE, "QUIT") # 按 Esc 关闭仿真窗口。
+            self.gym.subscribe_viewer_keyboard_event(
+                self.viewer, gymapi.KEY_V, "toggle_viewer_sync") # 焦点在仿真与显示之间切换
+            
+            self.vis = GymVisualizer(self.gym, self.sim, self.viewer, self.envs)
 
     # 步态奖励：“实际脚高度 z” 与 “步态调度器期望的脚高度 z” 的平方误差总和
     def _reward_gait_scheduler(self):
@@ -372,9 +394,9 @@ class ElSpider(LeggedRobot): # 继承
             self.async_gait_scheduler.reward_dof_nominal_pos()*get_weight('dof_nominal_pos', self.reward_scales_stage) + \
             self.async_gait_scheduler.reward_foot_z_align()*get_weight('reward_foot_z_align', self.reward_scales_stage)
 
-    # 六足同组的同步奖励，异组之间的异步奖励
+    # 六足同组的同步奖励，异组之间的异步奖励（实际是越大越惩罚）
     def _reward_gait_2_step(self):
-        # Foot index (alphabet): 0 LB, 1 LF, 2 LM, 3 RB, 4 RF, 5 RM
+        # Foot index (alphabet): 0 LB(left back), 1 LF, 2 LM, 3 RB, 4 RF, 5 RM
         # Hexapod 2-step gait: first group (0-1-5) synchronized, second group (2-3-4) synchronized
         # The two groups are asynchronized with each other
         

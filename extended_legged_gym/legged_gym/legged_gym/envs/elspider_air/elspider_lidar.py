@@ -359,7 +359,7 @@ class ElSpiderLidar(ElSpider): # 继承
             print(f"######Data will be saved to: {self.data_dir}")
         
         self.create_ground()
-        self.create_viewer()
+        # self.create_viewer()
 
         self._init_buffer() # 绑定 Isaac Gym root state，与 GPU 张量同步
         self.create_warp_env() # Warp 格式的 mesh 用于 Lidar 仿真
@@ -891,13 +891,17 @@ class ElSpiderLidar(ElSpider): # 继承
         # if hasattr(self.cfg.rewards, 'collision_termination_after_steps'):
         #     min_steps = self.cfg.rewards.collision_termination_after_steps
         # else:
-        min_steps = 10  # Default: only check collision after 10 steps
+        min_steps = 24  # Default: only check collision after 10 steps
         
         # Only terminate due to collision after protection period
         # This allows the robot to learn without being immediately terminated
         collision = self.min_obstacle_dist < collision_threshold
         collision_termination = collision & (self.episode_length_buf > min_steps)
         self.reset_buf |= collision_termination # 按位或赋值
+        # print(f"Test:Collision termination: {collision_termination}")
+
+        # print(f"Test:Reset buffer: {self.reset_buf}")
+
     
     def reset_idx(self, env_ids):
         super().reset_idx(env_ids)
@@ -968,19 +972,27 @@ class ElSpiderLidar(ElSpider): # 继承
         self.sensor_pos_tensor[:] = sensor_pos
         self.sensor_quat_tensor[:] = sensor_quat
 
+    def update_reward_scales(self, mean_reward):
+        if mean_reward > self.cfg.rewards.reward_stage_threshold and \
+                self.reward_scales_stage < self.cfg.rewards.reward_max_stage:
+            self.reward_scales_stage += 1
+            self.reward_scales = self._get_reward_scales(self.reward_scales_stage)
+            self._prepare_reward_function()
+            return True
+        return False
 
     # ============== Reward Functions ==============
+    # 继承于legged_robot_rew_mixin.py
     def _reward_base_height(self):
         # Penalize base height away from target
-        base_height = torch.mean(self.base_pos[:, 2].unsqueeze(
-            1) - self.measured_heights, dim=1)
+        base_height = torch.mean(self.base_pos[:, 2].unsqueeze(1) - self.measured_heights, dim=1)
         rew = torch.square(base_height - self.cfg.rewards.base_height_target)
         # print(f"base height: {base_height}, reward: {rew}")
         return rew
     
     def _reward_dof_power(self):
         # Penalize power consumption
-        return torch.sum(torch.abs(self.torques * self.dof_vel), dim=1)
+        return torch.sum(torch.abs(self.torques * self.dof_vel), dim=1) # 功率
     
     def _reward_action_rate(self):
         # Penalize changes in actions
@@ -1002,35 +1014,38 @@ class ElSpiderLidar(ElSpider): # 继承
         ang_vel_error = torch.square(self.commands[:, 2] - self.base_ang_vel[:, 2])
         return torch.exp(-ang_vel_error/self.cfg.rewards.tracking_sigma)
 
-    def _reward_feet_air_time(self):
-        # Reward long steps
-        contact = self.contact_forces[:, self.feet_indices, 2] > 1.
-        contact_filt = torch.logical_or(contact, self.last_contacts)
-        self.last_contacts = contact
-        first_contact = (self.feet_air_time > 0.) * contact_filt
-        self.feet_air_time += self.dt
-        rew_airTime = torch.sum((self.feet_air_time - 0.3) * first_contact, dim=1)  # reward only on first contact with the ground
-        rew_airTime *= torch.norm(self.commands[:, :2], dim=1) > 0.1  # no reward for zero command
-        self.feet_air_time *= ~contact_filt
-        return rew_airTime
+    # def _reward_feet_air_time(self):
+    #     # Reward long steps
+    #     # Need to filter the contacts because the contact reporting of PhysX is unreliable on meshes
+    #     contact = self.contact_forces[:, self.feet_indices, 2] > 1. # feet_indices从参数表中的关节名称找到asset中的对应关节，然后取得的索引
+    #     contact_filt = torch.logical_or(contact, self.last_contacts)
+    #     self.last_contacts = contact
+    #     first_contact = (self.feet_air_time > 0.) * contact_filt
+    #     self.feet_air_time += self.dt
+    #     self.feet_contact_time += self.dt
+    #     rew_airTime = torch.sum((self.feet_air_time - 0.3) * first_contact, dim=1)  # reward only on first contact with the ground
+    #     rew_airTime *= torch.norm(self.commands[:, :2], dim=1) > 0.1  # no reward for zero command
+    #     self.feet_air_time *= ~contact_filt
+    #     self.feet_contact_time *= contact_filt
+    #     return rew_airTime
 
     # def _reward_dof_vel_stand_still(self):
     #     # Penalize motion at zero commands
     #     return torch.sum(torch.abs(self.dof_vel), dim=1) * (torch.norm(self.commands[:, :3], dim=1) < 0.1)
 
-    # # def _reward_dof_pos_stand_still(self):
-    # #     # Penalize position deviation at zero commands
-    # #     return torch.sum(torch.square(self.dof_pos - self.default_dof_pos), dim=1) * (torch.norm(self.commands[:, :3], dim=1) < 0.1)
+    # def _reward_dof_pos_stand_still(self):
+    #     # Penalize position deviation at zero commands
+    #     return torch.sum(torch.square(self.dof_pos - self.default_dof_pos), dim=1) * (torch.norm(self.commands[:, :3], dim=1) < 0.1)
     
-    # # def _reward_feet_contact_stand_still(self):
-    # #     # Encourage feet contact with the ground at zero commands
-    # #     contacts = self.link_contact_forces[:, self.feet_contact_indices, 2] > 0.1
-    # #     full_contact = torch.sum(1.*contacts, dim=1)==len(self.feet_contact_indices)
-    # #     return 1.0*full_contact * (torch.norm(self.commands[:, :3], dim=1) < 0.1)
+    def _reward_feet_contact_stand_still(self):
+        # Encourage feet contact with the ground at zero commands
+        contacts = self.contact_forces[:, self.feet_indices, 2] > 0.1
+        contact_count = len(self.feet_indices) - torch.sum(1.*contacts, dim=1)
+        return 1.0*contact_count * (torch.norm(self.commands[:, :3], dim=1) < 0.1)
     
-    # # def _reward_dof_close_to_default(self):
-    #     # Penalize dof position deviation from default
-    #     return torch.sum(torch.square(self.dof_pos - self.default_dof_pos), dim=1)
+    def _reward_dof_close_to_default(self):
+        # Penalize dof position deviation from default
+        return torch.sum(torch.square(self.dof_pos - self.default_dof_pos), dim=1)
 
     def _reward_foot_clearance(self):
         """
@@ -1072,12 +1087,13 @@ class ElSpiderLidar(ElSpider): # 继承
         penalty = torch.exp(-self.min_obstacle_dist / danger_dist + 1) - 1
         penalty = torch.clamp(penalty, 0, 10)
         return penalty
-    
-    def _reward_dof_pos_limits(self):
-        # Penalize dof positions too close to the limit
-        out_of_limits = -(self.dof_pos - self.dof_pos_limits[:, 0]).clip(max=0.)  # lower limit
-        out_of_limits += (self.dof_pos - self.dof_pos_limits[:, 1]).clip(min=0.)
-        return torch.sum(out_of_limits, dim=1)
+
+    def _reward_body_joint_contact(self):
+        """Penalty for body/joint contacting the ground.原collision"""
+        if not hasattr(self, "penalised_contact_indices") or self.penalised_contact_indices.numel() == 0:
+            return torch.zeros(self.num_envs, device=self.device)
+        contact = torch.norm(self.contact_forces[:, self.penalised_contact_indices, :], dim=-1) > 0.1
+        return torch.sum(contact, dim=1)
     
     def _reward_lin_vel_z(self):
         # Penalize z axis base linear velocity
@@ -1103,7 +1119,7 @@ class ElSpiderLidar(ElSpider): # 继承
         # Draw LiDAR points for first environment
         if not self.headless and hasattr(self, 'lidar_points_buf'):
             self._draw_lidar_points()
-
+        
     def _draw_lidar_points(self):
         """Visualize LiDAR point cloud."""
         if not hasattr(self, 'viewer') or self.viewer is None:

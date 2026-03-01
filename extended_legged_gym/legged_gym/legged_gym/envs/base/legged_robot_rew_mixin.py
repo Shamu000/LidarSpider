@@ -186,7 +186,7 @@ class LeggedRobotRewMixin:
         return re
     
     def _sync_reward_func(self, foot_0: int, foot_1: int, max_err=2) -> torch.Tensor:
-        """Reward synchronization of two feet."""
+        """Reward synchronization of two feet.实际是越大越惩罚"""
         air_time = self.feet_air_time
         contact_time = self.feet_contact_time
         # penalize the difference between the most recent air time and contact time of synced feet pairs.
@@ -195,7 +195,7 @@ class LeggedRobotRewMixin:
         return se_air + se_contact
     
     def _async_reward_func(self, foot_0: int, foot_1: int, max_err=2) -> torch.Tensor:
-        """Reward anti-synchronization of two feet."""
+        """Reward anti-synchronization of two feet.实际是越大越惩罚"""
         air_time = self.feet_air_time
         contact_time = self.feet_contact_time
         # penalize the difference between opposing contact modes air time of feet 1 to contact time of feet 2

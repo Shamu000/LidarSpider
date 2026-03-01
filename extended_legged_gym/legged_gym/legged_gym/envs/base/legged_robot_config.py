@@ -145,6 +145,8 @@ class LeggedRobotCfg(BaseConfig):
         default_joint_angles = {  # target angles when action = 0.0
             "joint_a": 0.,
             "joint_b": 0.}
+        rand_zoom_min = 0.5
+        rand_zoom_max = 1.5
 
     class control:
         control_type = 'P'  # P: position, V: velocity, T: torques

@@ -42,7 +42,7 @@ class ElSpiderAirRoughCfg(LeggedRobotCfg):
         # path to the terrain file
         terrain_file = "/home/user/CodeSpace/Python/terrains/terrain.obj"
 
-        mesh_type = 'trimesh'  # "heightfield" # none, plane, heightfield or trimesh
+        mesh_type = 'plane'  # "heightfield" # none, plane, heightfield or trimesh
         horizontal_scale = 0.1  # [m]
         vertical_scale = 0.005  # [m]
         border_size = 100  # [m]
