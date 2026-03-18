@@ -20,6 +20,7 @@ from isaacgym import gymtorch, gymapi, gymutil
 from legged_gym.envs import ElSpider
 from legged_gym import LEGGED_GYM_ROOT_DIR
 from .mixed_terrains.elspider_air_rough_lidar_config import ElSpiderAirRoughLidarCfg
+from legged_gym.utils.gym_editor import ObstacleGen, ObstacleGenConfig
 from legged_gym.utils import GaitScheduler, GaitSchedulerCfg, AsyncGaitSchedulerCfg, AsyncGaitScheduler, \
     SimpleRaibertPlannerConfig, SimpleRaibertPlanner, RaibertPlanner, RaibertPlannerConfig
 from legged_gym.utils.helpers import class_to_dict
@@ -27,7 +28,7 @@ from legged_gym.utils.math_utils import quat_apply_yaw
 from legged_gym.utils.gym_visualizer import GymVisualizer
 
 from LidarSensor.lidar_sensor import LidarSensor
-from LidarSensor.example.isaacgym.utils.terrain.terrain import Terrain
+from LidarSensor.example.isaacgym.utils.terrain.terrain_lidar import Terrain
 from LidarSensor.example.isaacgym.utils.terrain.terrain_cfg import Terrain_cfg
 from LidarSensor import SENSOR_ROOT_DIR,RESOURCES_DIR
 
@@ -358,7 +359,7 @@ class ElSpiderLidar(ElSpider): # 继承
             
             print(f"######Data will be saved to: {self.data_dir}")
         
-        self.create_ground()
+        # self.create_ground()
         # self.create_viewer()
 
         self._init_buffer() # 绑定 Isaac Gym root state，与 GPU 张量同步
@@ -410,10 +411,70 @@ class ElSpiderLidar(ElSpider): # 继承
         print("  Arrow keys: Rotate robot")
         print("  ESC: Exit simulation")
 
-    def create_ground(self):
-        """Create a ground plane."""
-        self.terrain_cfg = ElSpiderAirRoughLidarCfg.Terrain_cfg()
+    def create_sim(self):
+        """Create a Genesis simulation."""
+        # configure sim
+        self.up_axis_idx = 2  # 2 for z, 1 for y -> adapt gravity accordingly
+        
+        # dt =  0.02
+        # self.dt = dt
+        # self.sim_params.dt = dt
+        # if self.physics_engine == gymapi.SIM_FLEX:
+        #     self.sim_params.flex.shape_collision_margin = 0.25
+        #     self.sim_params.flex.num_outer_iterations = 4
+        #     self.sim_params.flex.num_inner_iterations = 10
+        # elif self.physics_engine == gymapi.SIM_PHYSX:
+        #     self.sim_params.substeps = 1
+        #     self.sim_params.physx.solver_type = 1
+        #     self.sim_params.physx.num_position_iterations = 4
+        #     self.sim_params.physx.num_velocity_iterations = 1
+        #     self.sim_params.physx.num_threads = args.num_threads
+        #     self.sim_params.physx.use_gpu = args.use_gpu
+        #     self.sim_params.up_axis = gymapi.UP_AXIS_Z
+        #     self.sim_params.gravity = gymapi.Vec3(0.0, 0.0, -9.81)
+
+        self.sim = self.gym.create_sim(self.sim_device_id, self.graphics_device_id, self.physics_engine, self.sim_params)
+        if self.sim is None:
+            print("*** Failed to create sim")
+            quit()
+
+        mesh_type = self.cfg.terrain.mesh_type
+        self.terrain_cfg = ElSpiderAirRoughLidarCfg.terrain()
         self.terrain = Terrain(self.terrain_cfg, self.num_envs)
+
+        if mesh_type == 'plane':
+            self._create_ground_plane()
+        elif mesh_type == 'heightfield':
+            self._create_heightfield()
+        elif mesh_type in ['trimesh', 'confined_trimesh']:
+            self._create_trimesh()
+        elif mesh_type is not None:
+            raise ValueError("Terrain mesh type not recognised. Allowed types are [None, plane, heightfield, trimesh, confined_trimesh]")
+
+        self._create_envs()
+        self._setup_enhanced_lighting()
+
+        # Initialize obstacle config (will be used in create_sim)
+        self.obstacle_config = None
+        if hasattr(self.cfg, 'obstacle_gen') and self.cfg.obstacle_gen.enable_obstacles:
+            self.obstacle_config = ObstacleGenConfig()
+            # Apply custom settings from config
+            self.obstacle_config.min_stones_per_env = self.cfg.obstacle_gen.min_obstacles
+            self.obstacle_config.max_stones_per_env = self.cfg.obstacle_gen.max_obstacles
+            self.obstacle_config.spawn_height_range = self.cfg.obstacle_gen.spawn_height_range
+            self.obstacle_config.spawn_radius_range = self.cfg.obstacle_gen.spawn_radius_range
+            self.obstacle_config.density_range = self.cfg.obstacle_gen.stone_density_range
+            self.obstacle_config.friction_range = self.cfg.obstacle_gen.stone_friction_range
+            self.obstacle_config.restitution_range = self.cfg.obstacle_gen.stone_restitution_range
+            self.obstacle_config.cluster_probability = self.cfg.obstacle_gen.cluster_probability
+            self.obstacle_gen = ObstacleGen(self.gym, self.sim, self.envs, self.obstacle_config)
+            self.obstacle_gen.generate_stones()
+
+
+    # def create_ground(self):
+    #     """Create a ground plane."""
+    #     self.terrain_cfg = ElSpiderAirRoughLidarCfg.terrain()
+    #     self.terrain = Terrain(self.terrain_cfg, self.num_envs)
         
     def _init_buffer(self):
         """Initialize buffers including LiDAR observation buffers."""
@@ -446,7 +507,7 @@ class ElSpiderLidar(ElSpider): # 继承
         
         
         self.height_points = self._init_height_points()
-        self.measured_heights=self._get_heights()
+        # self.measured_heights=self._get_heights() # 待删：是否注释
         
         # LiDAR observation buffers
         num_lidar_obs = self.num_theta_bins * self.num_phi_bins
@@ -1112,13 +1173,13 @@ class ElSpiderLidar(ElSpider): # 继承
     #     exploration_reward = forward_vel * safety_factor
     #     return torch.clamp(exploration_reward, -1, 1)
 
-    def _draw_debug_vis(self):
-        """Draw debug visualization including LiDAR points."""
-        super()._draw_debug_vis()
+    # def _draw_debug_vis(self):
+    #     """Draw debug visualization including LiDAR points."""
+    #     super()._draw_debug_vis()
         
-        # Draw LiDAR points for first environment
-        if not self.headless and hasattr(self, 'lidar_points_buf'):
-            self._draw_lidar_points()
+    #     # Draw LiDAR points for first environment
+    #     if not self.headless and hasattr(self, 'lidar_points_buf'):
+    #         self._draw_lidar_points()
         
     def _draw_lidar_points(self):
         """Visualize LiDAR point cloud."""

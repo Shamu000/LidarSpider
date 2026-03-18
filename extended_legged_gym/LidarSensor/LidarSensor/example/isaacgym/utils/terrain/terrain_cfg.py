@@ -37,7 +37,7 @@ class Terrain_cfg(BaseConfig):
     y_range = [-0.4, 0.4]
     
     edge_width_thresh = 0.05
-    horizontal_scale = 0.05 # [m] influence computation time by a lot
+    horizontal_scale = 0.05 # [m / pixel] influence computation time by a lot 每个像素代表的实际距离
     horizontal_scale_camera = 0.1
     vertical_scale = 0.005 # [m]
     border_size = 5 # [m]
@@ -64,9 +64,9 @@ class Terrain_cfg(BaseConfig):
     max_init_terrain_level = 5 # starting curriculum state
     max_difficulty = True
     terrain_length = 18.
-    terrain_width = 18
-    num_rows= 2 # number of terrain rows (levels)  # spreaded is benifitiall !
-    num_cols = 2# number of terrain cols (types)
+    terrain_width = 18 # 每个区块所有像素和的宽度
+    num_rows= 2 # number of terrain rows (levels)  # spreaded is benifitiall ! 难度按行分布，地形类型按列分布
+    num_cols = 2# number of terrain cols (types) # 这个数字代表多少种地形区块，每个区块有许多像素
     
     terrain_dict = {"smooth slope": 0., 
                     "rough slope up": 0.0,
@@ -88,7 +88,7 @@ class Terrain_cfg(BaseConfig):
                     "parkour_step": 0.2,
                     "parkour_gap": 0.15,
                     "demo": 0.15,}
-    terrain_proportions = list(terrain_dict.values())
+    terrain_proportions = list(terrain_dict.values()) # 保存地形比例
     flat_wall = False # if True, wall is flat
     # trimesh only:
     slope_treshold = 1.5# slopes above this threshold will be corrected to vertical surfaces

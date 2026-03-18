@@ -12,61 +12,10 @@ from abc import ABC, abstractmethod
 class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
     class env(ElSpiderAirRoughTrainCfg.env):
         # Update observation space for raycast data
-        num_observations = 253 + 192*3  # MID360
+        # num_observations = 253 + 272 + 192*3  # MID360
+        num_observations = 66 + 192*3  # MID360, 不扫描周围高度
         # num_observations = 66 # 无雷达
         episode_length_s = 10
-
-    class terrain(ElSpiderAirRoughTrainCfg.terrain):
-        use_terrain_obj = False  # use TerrainObj class to create terrain
-        # path to the terrain file
-        terrain_file = None
-
-        mesh_type = 'plane'  # "heightfield" # none, plane, heightfield or trimesh or confined_trimesh
-        horizontal_scale = 0.1  # [m]
-        vertical_scale = 0.005  # [m]
-        border_size = 10  # [m]
-        curriculum = True
-        static_friction = 1.0
-        dynamic_friction = 1.0
-        restitution = 0.
-        # rough terrain only:
-        measure_heights = True # 若为true，则要给obs_buf加187维
-        measured_points_x = [-0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1,
-                             0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]  # 1mx1.6m rectangle (without center line)
-        measured_points_y = [-0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4, 0.5]
-        selected = False  # select a unique terrain type and pass all arguments
-        terrain_kwargs = None  # Dict of arguments for selected terrain
-        max_init_terrain_level =0  # starting curriculum state
-        terrain_length = 4.
-        terrain_width = 4.
-        num_rows = 4  # number of terrain rows (levels)
-        num_cols = 6  # number of terrain cols (types)
-        difficulty_scale = 1.0  # Scale for difficulty in curriculum
-        # terrain types: [smooth slope, rough slope, stairs up, stairs down, discrete]
-        terrain_proportions = [0.1, 0.1, 0.3, 0.3, 0.2]
-        # confined terrain types: [tunnel, barrier, timber_piles, confined_gap]
-        confined_terrain_proportions = [0.0, 0.2, 0.3, 0.3]
-        # trimesh only:
-        slope_treshold = 0.75  # slopes above this threshold will be corrected to vertical surfaces
-
-    class sim:
-        dt = 0.005
-        substeps = 1
-        gravity = [0., 0., -9.81]  # [m/s^2]
-        up_axis = 1  # 0 is y, 1 is z
-
-        class physx:
-            num_threads = 10
-            solver_type = 1  # 0: pgs, 1: tgs
-            num_position_iterations = 4
-            num_velocity_iterations = 0
-            contact_offset = 0.01  # [m]
-            rest_offset = 0.0   # [m]
-            bounce_threshold_velocity = 0.5  # 0.5 [m/s]
-            max_depenetration_velocity = 1.0
-            max_gpu_contact_pairs = 2**23  # 2**24 -> needed for 8000 envs and more
-            default_buffer_size_multiplier = 5
-            contact_collection = 2  # 0: never, 1: last sub-step, 2: all sub-steps (default=2)
 
     class BaseConfig:
         def __init__(self) -> None:
@@ -94,11 +43,41 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
                     # recursively init members of the attribute
                     ElSpiderAirRoughLidarCfg.BaseConfig.init_member_classes(i_var)
 
-    class BaseSensorConfig(ABC):
-        pass
 
-    class Terrain_cfg(BaseConfig):
-        mesh_type = 'trimesh' # "heightfield" # none, plane, heightfield or trimesh
+    class terrain(ElSpiderAirRoughTrainCfg.terrain, BaseConfig):
+        use_terrain_obj = False  # use TerrainObj class to create terrain
+        # path to the terrain file
+        terrain_file = None
+
+        mesh_type = 'plane'  # "heightfield" # none, plane, heightfield or trimesh or confined_trimesh
+        horizontal_scale = 0.1  # [m]
+        vertical_scale = 0.005  # [m]
+        border_size = 10  # [m]
+        curriculum = True # 雷达中是false
+        static_friction = 1.0
+        dynamic_friction = 1.0
+        restitution = 0.
+        # rough terrain only:
+        measure_heights = False # 若为true，则要给obs_buf加187维
+        measured_points_x = [-0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1,
+                             0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]  # 1mx1.6m rectangle (without center line)
+        measured_points_y = [-0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4, 0.5]
+        selected = False  # select a unique terrain type and pass all arguments
+        terrain_kwargs = None  # Dict of arguments for selected terrain
+        max_init_terrain_level =0  # starting curriculum state
+        terrain_length = 4.
+        terrain_width = 4.
+        num_rows = 4  # number of terrain rows (levels)
+        num_cols = 6  # number of terrain cols (types)
+        difficulty_scale = 1.0  # Scale for difficulty in curriculum
+        # terrain types: [smooth slope, rough slope, stairs up, stairs down, discrete]
+        terrain_proportions = [0.1, 0.1, 0.3, 0.3, 0.2]
+        # confined terrain types: [tunnel, barrier, timber_piles, confined_gap]
+        confined_terrain_proportions = [0.0, 0.2, 0.3, 0.3]
+        # trimesh only:
+        slope_treshold = 0.75  # slopes above this threshold will be corrected to vertical surfaces
+
+        # 雷达新加
         hf2mesh_method = "grid"  # grid or fast
         max_error = 0.1 # for fast
         max_error_camera = 2
@@ -106,37 +85,26 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
         y_range = [-0.4, 0.4]
         
         edge_width_thresh = 0.05
-        horizontal_scale = 0.05 # [m] influence computation time by a lot
         horizontal_scale_camera = 0.1
-        vertical_scale = 0.005 # [m]
-        border_size = 5 # [m]
         height = [0.02, 0.06]
         simplify_grid = False
         gap_size = [0.02, 0.1]
         stepping_stone_distance = [0.02, 0.08]
         downsampled_scale = 0.075
-        curriculum = True
 
         all_vertical = False
-        no_flat = True
-        
-        static_friction = 1.0
-        dynamic_friction = 1.0
-        restitution = 0.
-        measure_heights = True
+        no_flat = False
+
         measured_points_x = [-1.2, -1.05,-0.9,-0.75,-0.6,-0.45, -0.3, -0.15, 0, 0.15, 0.3, 0.45, 0.6, 0.75, 0.9, 1.05, 1.2,1.35,1.5,1.65,1.8,1.95,2.1,2.25,2.4,2.55,2.7] # 1mx1.6m rectangle (without center line)
         measured_points_y = [-1.2,-1.05,-0.9,-0.75, -0.6, -0.45, -0.3, -0.15, 0., 0.15, 0.3, 0.45, 0.6, 0.75,0.9,1.05,1.2]
         measure_horizontal_noise = 0.0
 
-        selected = False # select a unique terrain type and pass all arguments
-        terrain_kwargs = None # Dict of arguments for selected terrain
-        max_init_terrain_level = 5 # starting curriculum state
-        max_difficulty = False
+        max_difficulty = False # 待测
         terrain_length = 18.
         terrain_width = 18
         num_rows= 2 # number of terrain rows (levels)  # spreaded is benifitiall !
         num_cols = 2# number of terrain cols (types)
-        
+
         terrain_dict = {"smooth slope": 0., 
                         "rough slope up": 0.0,
                         "rough slope down": 0.0,
@@ -163,6 +131,28 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
         slope_treshold = 1.5# slopes above this threshold will be corrected to vertical surfaces
         origin_zero_z = True
         num_sub_terrains = num_rows * num_cols
+
+    class sim:
+        dt = 0.005
+        substeps = 1
+        gravity = [0., 0., -9.81]  # [m/s^2]
+        up_axis = 1  # 0 is y, 1 is z
+
+        class physx:
+            num_threads = 10
+            solver_type = 1  # 0: pgs, 1: tgs
+            num_position_iterations = 4
+            num_velocity_iterations = 0
+            contact_offset = 0.01  # [m]
+            rest_offset = 0.0   # [m]
+            bounce_threshold_velocity = 0.5  # 0.5 [m/s]
+            max_depenetration_velocity = 1.0
+            max_gpu_contact_pairs = 2**23  # 2**24 -> needed for 8000 envs and more
+            default_buffer_size_multiplier = 5
+            contact_collection = 2  # 0: never, 1: last sub-step, 2: all sub-steps (default=2)
+
+    class BaseSensorConfig(ABC):
+        pass
 
     class LidarType(Enum):
         """Standardized lidar sensor types"""

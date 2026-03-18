@@ -166,6 +166,8 @@ __pycache__/
 # #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 # #.idea/
 doc/
-extended_legged_gym/legged_gym/resources/
-extended_legged_gym/LidarSensor/LidarSensor/resources/
+extended_legged_gym/legged_gym/resources/*
+!extended_legged_gym/legged_gym/resources/.gitkeep
+extended_legged_gym/LidarSensor/LidarSensor/resources/*
+!extended_legged_gym/LidarSensor/LidarSensor/resources/.gitkeep
 

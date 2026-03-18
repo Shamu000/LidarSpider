@@ -36,7 +36,7 @@ from isaacgym import terrain_utils
 from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg
 
 
-class Terrain: # 标记第三处
+class Terrain:
     def __init__(self, cfg: LeggedRobotCfg.terrain, num_robots) -> None:
 
         self.cfg = cfg  # 加载配置的地形参数

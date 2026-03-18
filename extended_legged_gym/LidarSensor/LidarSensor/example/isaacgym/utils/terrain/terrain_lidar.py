@@ -37,15 +37,16 @@ from pydelatin import Delatin
 import pyfqmr
 from scipy.ndimage import binary_dilation
 from .terrain_cfg import Terrain_cfg
+from legged_gym.envs.elspider_air.mixed_terrains.elspider_air_rough_lidar_config import ElSpiderAirRoughLidarCfg
 
 from legged_gym.envs.base.legged_robot_config import LeggedRobotCfg
 
 class Terrain:
-    def __init__(self, cfg:Terrain_cfg, num_robots) -> None:
+    def __init__(self, cfg:ElSpiderAirRoughLidarCfg.terrain, num_robots) -> None:
         self.cfg = cfg
         self.num_robots = num_robots
         self.type = cfg.mesh_type
-        if self.type in ["none", 'plane']:
+        if self.type in ["none"]:
             return
         self.env_length = cfg.terrain_length
         self.env_width = cfg.terrain_width
@@ -65,6 +66,35 @@ class Terrain:
 
         # 创建空白高度图
         self.height_field_raw = np.zeros((self.tot_rows , self.tot_cols), dtype=np.int16)
+        if (self.type=="plane") :
+            print("Converting plane heightmap to trimesh...")
+            if cfg.hf2mesh_method == "grid":
+                self.vertices, self.triangles, self.x_edge_mask = convert_heightfield_to_trimesh(self.height_field_raw,
+                                                                                                self.cfg.horizontal_scale,
+                                                                                                self.cfg.vertical_scale,
+                                                                                                self.cfg.slope_treshold)
+                half_edge_width = int(self.cfg.edge_width_thresh / self.cfg.horizontal_scale)
+                structure = np.ones((half_edge_width*2+1, 1))
+                self.x_edge_mask = binary_dilation(self.x_edge_mask, structure=structure)
+                if self.cfg.simplify_grid:
+                    mesh_simplifier = pyfqmr.Simplify()
+                    mesh_simplifier.setMesh(self.vertices, self.triangles)
+                    mesh_simplifier.simplify_mesh(target_count = int(0.05*self.triangles.shape[0]), aggressiveness=7, preserve_border=True, verbose=10)
+
+                    self.vertices, self.triangles, normals = mesh_simplifier.getMesh()
+                    self.vertices = self.vertices.astype(np.float32)
+                    self.triangles = self.triangles.astype(np.uint32)
+
+                    for j in range(self.cfg.num_cols):
+                        for i in range(self.cfg.num_rows):
+                            # terrain = terrain_utils.pyramid_sloped_terrain(self, slope=0, platform_size=0.1)
+                            self.add_terrain_to_map(self, i, j)
+            else:
+                assert cfg.hf2mesh_method == "fast", "Height field to mesh method must be grid or fast"
+                self.vertices, self.triangles = convert_heightfield_to_trimesh_delatin(self.height_field_raw, self.cfg.horizontal_scale, self.cfg.vertical_scale, max_error=cfg.max_error)
+            print("Created {} vertices".format(self.vertices.shape[0]))
+            print("Created {} triangles".format(self.triangles.shape[0]))
+            return
         if cfg.curriculum:
             self.curiculum()
         elif cfg.selected:
@@ -80,7 +110,7 @@ class Terrain:
         if self.type=="trimesh":
             print("Converting heightmap to trimesh...")
             if cfg.hf2mesh_method == "grid":
-                self.vertices, self.triangles, self.x_edge_mask = convert_heightfield_to_trimesh(   self.height_field_raw,
+                self.vertices, self.triangles, self.x_edge_mask = convert_heightfield_to_trimesh(self.height_field_raw,
                                                                                                 self.cfg.horizontal_scale,
                                                                                                 self.cfg.vertical_scale,
                                                                                                 self.cfg.slope_treshold)
@@ -143,16 +173,31 @@ class Terrain:
             self.add_terrain_to_map(terrain, i, j)
     
     def add_roughness(self, terrain, difficulty=1):
+        # 添加随机高度扰动，增加地形的复杂度
         max_height = (self.cfg.height[1] - self.cfg.height[0]) * difficulty + self.cfg.height[0]
         height = random.uniform(self.cfg.height[0], max_height)
         terrain_utils.random_uniform_terrain(terrain, min_height=-height, max_height=height, step=0.005, downsampled_scale=self.cfg.downsampled_scale)
 
     def make_terrain(self, choice, difficulty):
+        '''
+        地形类型比例在cfg类里面改,地形的话,isaacgym安装文件夹里面的terrain.py还有很多其他的地形可以直接用,当然你也可以自己写。
+        这里为什么要创建一个SubTerrain对象呢?因为要用isaacgym官方封装的库函数(terrain_utils.py)
+        来生成地形。所以想调用这些函数就必须先创建一个 SubTerrain 对象。
+        '''
         terrain = terrain_utils.SubTerrain(   "terrain",
                                 width=self.length_per_env_pixels,
                                 length=self.width_per_env_pixels,
                                 vertical_scale=self.cfg.vertical_scale,
                                 horizontal_scale=self.cfg.horizontal_scale)
+        '''
+        slope:倾斜度，随着难度增加，倾斜度逐渐加大。
+        step_height:步高，随着难度增加，步高增加。
+        discrete_obstacles_height:障碍物的高度。
+        stepping_stones_size:跳石的大小，随着难度增加，跳石的大小减小。
+        stone_distance:跳石间距，难度为 0 时较小，其他难度较大。
+        gap_size:间隙大小，随着难度增加而增大。
+        pit_depth:坑深，随着难度增加，坑深增加。
+        '''
         slope = difficulty * 0.4
         step_height = 0.02 + 0.14 * difficulty
         discrete_obstacles_height = 0.03 + difficulty * 0.15
@@ -160,6 +205,14 @@ class Terrain:
         stone_distance = 0.05 if difficulty==0 else 0.1
         gap_size = 1. * difficulty
         pit_depth = 1. * difficulty
+        '''
+        choice 用来决定生成哪种类型的地形。它的值与 self.proportions 的数组进行比较，
+        从而选择不同的地形生成方法。每个 choice 范围对应一种特定的地形类型。
+        前置:假设LeggedRobotCfg.terrain.terrain_proportions = [ 0.1,    0.1,  0.35, 0.25,  0.2]
+        各种地形类别占比：                                      平滑斜坡 崎岖斜坡 上楼梯 下楼梯 离散地形
+        那么执行该函数之前这个值会被传递并且改造成self.proportions = [0.1, 0.2, 0.55, 0.8, 1.0]（改成累加式）
+        '''
+        # 斜坡
         if choice < self.proportions[0]:
             idx = 0
             if choice < self.proportions[0]/ 2:
@@ -167,6 +220,7 @@ class Terrain:
                 slope *= -1
             terrain_utils.pyramid_sloped_terrain(terrain, slope=slope, platform_size=3.)
             # self.add_roughness(terrain)
+        # 崎岖斜坡     
         elif choice < self.proportions[2]:
             idx = 2
             if choice<self.proportions[1]:
@@ -174,6 +228,7 @@ class Terrain:
                 slope *= -1
             terrain_utils.pyramid_sloped_terrain(terrain, slope=slope, platform_size=3.)
             self.add_roughness(terrain)
+        # 上下楼梯
         elif choice < self.proportions[4]:
             idx = 4
             if choice<self.proportions[3]:
@@ -181,6 +236,7 @@ class Terrain:
                 step_height *= -1
             terrain_utils.pyramid_stairs_terrain(terrain, step_width=0.31, step_height=step_height, platform_size=3.)
             self.add_roughness(terrain)
+        # 生成离散地形（石板地形）
         elif choice < self.proportions[5]:
             idx = 6
             num_rectangles = 20
@@ -188,6 +244,7 @@ class Terrain:
             rectangle_max_size = 2.
             terrain_utils.discrete_obstacles_terrain(terrain, discrete_obstacles_height, rectangle_min_size, rectangle_max_size, num_rectangles, platform_size=3.)
             self.add_roughness(terrain)
+        # 生成半斜坡和跳石地形
         elif choice < self.proportions[6]:
             idx = 7
             stones_size = 1.5 - 1.2*difficulty
@@ -195,18 +252,22 @@ class Terrain:
             half_sloped_terrain(terrain, wall_width=4, start2center=0.5, max_height=0.00)
             stepping_stones_terrain(terrain, stone_size=1.5-0.2*difficulty, stone_distance=0.0+0.4*difficulty, max_height=0.2*difficulty, platform_size=1.2)
             self.add_roughness(terrain)
+        # 中央有间隙的跑酷式地形（有坑/通道，带粗糙度）
         elif choice < self.proportions[7]:
             idx = 8
             # gap_size = random.uniform(self.cfg.gap_size[0], self.cfg.gap_size[1])
             gap_parkour_terrain(terrain, difficulty, platform_size=4)
             self.add_roughness(terrain)
+        # 仅添加随机粗糙度的地形
         elif choice < self.proportions[8]:
             idx = 9
             self.add_roughness(terrain)
             # pass
+        # 坑/深洞区域
         elif choice < self.proportions[9]:
             idx = 10
             pit_terrain(terrain, depth=pit_depth, platform_size=4.)
+        # 墙/垂直面
         elif choice < self.proportions[10]:
             idx = 11
             if self.cfg.all_vertical:
@@ -234,11 +295,13 @@ class Terrain:
             top_mask = terrain.height_field_raw > max_height - 0.05
             self.add_roughness(terrain, difficulty=1)
             terrain.height_field_raw[top_mask] = max_height
+        # 半平台/高台
         elif choice < self.proportions[11]:
             idx = 12
             # half platform terrain
             half_platform_terrain(terrain, max_height=0.1 + 0.4 * difficulty )
             self.add_roughness(terrain, difficulty=1)
+        # 阶梯
         elif choice < self.proportions[13]:
             idx = 13
             height = 0.1 + 0.3 * difficulty
@@ -247,6 +310,7 @@ class Terrain:
                 height *= -1
             terrain_utils.pyramid_stairs_terrain(terrain, step_width=1., step_height=height, platform_size=3.)
             self.add_roughness(terrain)
+        # 一系列石块/坡道组成的跑酷路线
         elif choice < self.proportions[14]:
             x_range = [-0.1, 0.1+0.3*difficulty]  # offset to stone_len
             y_range = [0.2, 0.3+0.1*difficulty]
@@ -266,6 +330,7 @@ class Terrain:
             idx = 15
             # terrain.height_field_raw[:] = 0
             self.add_roughness(terrain)
+        # 连续跨越障碍
         elif choice < self.proportions[15]:
             idx = 16
             parkour_hurdle_terrain(terrain,
@@ -279,6 +344,7 @@ class Terrain:
                                    )
             # terrain.height_field_raw[:] = 0
             self.add_roughness(terrain)
+        # 平坦变种的栏杆/墩
         elif choice < self.proportions[16]:
             idx = 17
             parkour_hurdle_terrain(terrain,
@@ -291,6 +357,7 @@ class Terrain:
                                    flat=True
                                    )
             #self.add_roughness(terrain)
+        # 多段阶梯式跑酷
         elif choice < self.proportions[17]:
             idx = 18
             parkour_step_terrain(terrain,
@@ -302,6 +369,7 @@ class Terrain:
                                    pad_height=0,
                                    )
             self.add_roughness(terrain)
+        # 多重间隙/断层跑酷
         elif choice < self.proportions[18]:
             idx = 19
             parkour_gap_terrain(terrain,
@@ -315,6 +383,7 @@ class Terrain:
                                 # flat=True
                                 )
             self.add_roughness(terrain)
+        # 演示组合地形
         elif choice < self.proportions[19]:
             idx = 20
             demo_terrain(terrain)

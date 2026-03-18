@@ -1,8 +1,13 @@
 {
     "python-envs.defaultEnvManager": "ms-python.python:conda",
     "python-envs.defaultPackageManager": "ms-python.python:conda",
-    "python-envs.pythonProjects": [],
     "python.analysis.extraPaths": [
         "./extended_legged_gym/rsl_rl"
-    ]
+    ],
+    "files.watcherExclude": {
+        "**/ckpt/**": true,
+        "**/logs/**": true,
+        "**/__pycache__/**": true,
+        "**/*.npy": true
+    }    
 }

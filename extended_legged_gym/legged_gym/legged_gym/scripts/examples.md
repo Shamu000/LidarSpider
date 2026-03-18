@@ -66,6 +66,6 @@ python3 /home/hithcat/Code/DaChuang/final/OmniPerception/extended_legged_gym/leg
 ```
 
 # Tensorboard
-```
+```bash
 tensorboard --logdir /home/hithcat/Code/DaChuang/LidarSpider/extended_legged_gym/legged_gym/logs/elspider_air_rough_lidar/v1
 ```

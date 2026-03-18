@@ -183,20 +183,21 @@ class GymVisualizer:
         :param end: 终点[x,y,z]
         :param color: 可选颜色向量(RGB)
         """
-        self.draw_boldline(env_idx, [start, end], rad=width, color=color)
+        self.draw_boldline(env_idx, [start, end], rad=width, color=color) # 先画一条粗线作为箭身
 
-        len = np.linalg.norm(np.array(end) - np.array(start))
-        dir_origin = gymapi.Vec3(0, 0, 1)
-        direction = gymapi.Vec3(*(np.array(end) - np.array(start)))
+        len = np.linalg.norm(np.array(end) - np.array(start)) # 箭头到机身的长度
+        dir_origin = gymapi.Vec3(0, 0, 1) # 参考方向
+        direction = gymapi.Vec3(*(np.array(end) - np.array(start))) # 解包然后传入Vec3构造函数
         pose = gymapi.Transform()
         pose.p = gymapi.Vec3(*start)
-        axis = dir_origin.cross(direction)
+        axis = dir_origin.cross(direction) # 叉乘以算出旋转轴
         # Avoid division by zero
         angle = math.acos(
             dir_origin.dot(direction) / (dir_origin.length() * direction.length())
-            ) if dir_origin.length() * direction.length() != 0 else 0
-        pose.r = gymapi.Quat.from_axis_angle(axis, angle)
-        geom = WireframeArrowGeometry(radius=width*3, length=len, color=color)
+            ) if dir_origin.length() * direction.length() != 0 else 0 # 点积除以模长乘积算出旋转角度
+        # print(f"Drawing arrow from {start} to {end}, direction={direction}, axis={axis}, angle={angle}")
+        pose.r = gymapi.Quat.from_axis_angle(axis, angle) # 从旋转轴和旋转角度构造四元数
+        geom = WireframeArrowGeometry(radius=width*3, length=len, color=color) # 创建箭头几何体
         gymutil.draw_lines(
             geom,
             self.gym,

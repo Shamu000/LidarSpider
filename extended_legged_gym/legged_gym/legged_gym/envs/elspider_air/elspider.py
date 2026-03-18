@@ -280,6 +280,7 @@ class ElSpider(LeggedRobot): # 继承
             base_pos = self.root_states[i, :3].cpu().numpy()
             self.vis.draw_arrow(i, base_pos, base_pos + lin_vel[i], color=(0, 1, 0))
             self.vis.draw_arrow(i, base_pos, base_pos + cmd_vel_world[i], color=(1, 0, 0))
+            # print(f"Env {i}: base_pos={base_pos}, lin_vel={lin_vel[i]}, cmd_vel_world={cmd_vel_world[i]}")
         return super()._draw_debug_vis()
 
     # 环境重置时，额外清空执行器网络的隐藏状态
