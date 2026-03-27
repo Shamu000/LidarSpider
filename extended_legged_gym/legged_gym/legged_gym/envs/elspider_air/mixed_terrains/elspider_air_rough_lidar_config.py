@@ -13,7 +13,7 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
     class env(ElSpiderAirRoughTrainCfg.env):
         # Update observation space for raycast data
         # num_observations = 253 + 272 + 192*3  # MID360
-        num_observations = 66 + 192*3  # MID360, 不扫描周围高度
+        num_observations = 354  # MID360, 不扫描周围高度
         # num_observations = 66 # 无雷达
         episode_length_s = 10
 
@@ -49,26 +49,27 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
         # path to the terrain file
         terrain_file = None
 
-        mesh_type = 'plane'  # "heightfield" # none, plane, heightfield or trimesh or confined_trimesh
+        mesh_type = 'trimesh'   # none, plane, heightfield or trimesh or confined_trimesh
         horizontal_scale = 0.1  # [m]
         vertical_scale = 0.005  # [m]
-        border_size = 10  # [m]
+        border_size = 10.0  # [m]
         curriculum = True # 雷达中是false
         static_friction = 1.0
         dynamic_friction = 1.0
         restitution = 0.
         # rough terrain only:
         measure_heights = False # 若为true，则要给obs_buf加187维
+        draw_lidar_points = False
         measured_points_x = [-0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1,
                              0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]  # 1mx1.6m rectangle (without center line)
         measured_points_y = [-0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4, 0.5]
         selected = False  # select a unique terrain type and pass all arguments
         terrain_kwargs = None  # Dict of arguments for selected terrain
-        max_init_terrain_level =0  # starting curriculum state
-        terrain_length = 4.
-        terrain_width = 4.
+        max_init_terrain_level = 3  # starting curriculum state 最大难度等级，用于初始化机器人的位置
+        terrain_length = 18.
+        terrain_width = 18.
         num_rows = 4  # number of terrain rows (levels)
-        num_cols = 6  # number of terrain cols (types)
+        num_cols = 4  # number of terrain cols (types)
         difficulty_scale = 1.0  # Scale for difficulty in curriculum
         # terrain types: [smooth slope, rough slope, stairs up, stairs down, discrete]
         terrain_proportions = [0.1, 0.1, 0.3, 0.3, 0.2]
@@ -100,31 +101,28 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
         measure_horizontal_noise = 0.0
 
         max_difficulty = False # 待测
-        terrain_length = 18.
-        terrain_width = 18
-        num_rows= 2 # number of terrain rows (levels)  # spreaded is benifitiall !
-        num_cols = 2# number of terrain cols (types)
 
-        terrain_dict = {"smooth slope": 0., 
-                        "rough slope up": 0.0,
-                        "rough slope down": 0.0,
-                        "rough stairs up": 0.0, 
-                        "rough stairs down": 0.0, 
-                        "discrete": 0., 
-                        "stepping stones": 0.05,
-                        "gaps": 0.05, 
-                        "smooth flat": 0,
-                        "pit": 0.,
-                        "wall": 0.,
-                        "platform": 0.,
-                        "large stairs up": 0.,
-                        "large stairs down": 0.,
-                        "parkour": 0.2,
-                        "parkour_hurdle": 0.2,
-                        "parkour_flat": 0.0,
-                        "parkour_step": 0.2,
-                        "parkour_gap": 0.15,
-                        "demo": 0.15,}
+        terrain_dict = {"smooth slope": 0.0, # 平缓斜坡
+                        "rough slope up": 0.5, # 崎岖上坡
+                        "rough slope down": 0.5, # 崎岖下坡
+                        "rough stairs up": 0.0, # 崎岖上楼梯
+                        "rough stairs down": 0.0, # 崎岖下楼梯
+                        "discrete": 0., # 离散地形（离散障碍）
+                        "stepping stones": 0.0, # 踏石（踏脚石）
+                        "gaps": 0.0, # 间隙 / 缺口
+                        "smooth flat": 0.0, # 平坦地面
+                        "pit": 0., # 坑洞 / 陷坑
+                        "wall": 0., # 墙壁
+                        "platform": 0., # 平台
+                        "large stairs up": 0., # 大阶梯上
+                        "large stairs down": 0., # 大阶梯下
+                        "parkour": 0., # 跑酷地形
+                        "parkour_hurdle": 0., # 跑酷 — 障碍（跨栏）
+                        "parkour_flat": 0.0, # 跑酷 — 平地
+                        "parkour_step": 0., # 跑酷 — 台阶
+                        "parkour_gap": 0., # 跑酷 — 间隙（跳跃缝隙）
+                        "demo": 0., # 演示（示例）地形
+                        }
         terrain_proportions = list(terrain_dict.values())
         flat_wall = False # if True, wall is flat
         # trimesh only:
@@ -190,7 +188,7 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
 
         # 雷达初始姿态
         sensor_offset_pos: list = field(default_factory=lambda: [0.3, 0.0, 0.35])  # [x, y, z] in meters
-        sensor_offset_rpy: list = field(default_factory=lambda: [0.0, 0.0, 0.0])  # [roll, pitch, yaw] in degrees
+        sensor_offset_rpy: list = field(default_factory=lambda: [3.14, 0.0, 3.14])  # [roll, pitch, yaw] in degrees
         
         # Range settings
         max_range: float = 50.0
@@ -341,17 +339,17 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
         self_collisions = 0 # 1 to disable, 0 to enable...bitwise filter
 
     class rewards(ElSpiderAirRoughTrainCfg.rewards):
-        base_height_target = 0.28
+        base_height_target = 0.30
         max_contact_force = 500.
         only_positive_rewards = True
 
         # Obstacle avoidance parameters
         safe_obstacle_dist = 0.5    # Distance considered safe (meters)
         danger_obstacle_dist = 0.3  # Distance considered dangerous (meters)
-        collision_threshold = 0.4  # Distance for collision termination (meters) - reduced from 0.15
+        collision_threshold = 0.1  # Distance for collision termination (meters) - reduced from 0.15
         
         # Termination protection - disable collision termination during early training steps
-        # collision_termination_after_steps = 10  # Only terminate after this many steps
+        collision_termination_after_steps = 20  # Only terminate after this many steps
         # allow_initial_contact_steps = 5  # Allow contact termination grace period
 
         # Multi-stage rewards
@@ -370,9 +368,9 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
             # Base penalties
             lin_vel_z = [-2.0, -2.5, -3.0]
             ang_vel_xy = -0.05
-            orientation = -5.0
+            orientation = -0.3
             torques = -0.00001
-            base_height = [-8.0, -8.0, -8.0]
+            base_height = [-2.0, -3.0, -4.0]
             # DOF penalties
             dof_vel = 0.
             dof_acc = -5e-8
@@ -381,9 +379,9 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
             action_rate = [-0.001, -0.001, -0.001]
             action_smoothness = -0.01
             # Feet penalties
-            feet_slip = [-0.0, -0.4]  #脚部打滑惩罚
+            feet_slip = [-0.0, -0.4, -1.2]  #脚部打滑惩罚
             jump_air = 0
-            feet_air_time = 0.8
+            feet_air_time = 1.0
             feet_stumble = -0.0 # 脚部碰到垂直面的惩罚
             # feet_stumble_liftup = [1.0, 1.0, 2.0] # 脚部碰到垂直面时向上抬起的奖励
             # feet_contact_forces = [-0.01, -0.05, -0.05]  # Avoid jumping
