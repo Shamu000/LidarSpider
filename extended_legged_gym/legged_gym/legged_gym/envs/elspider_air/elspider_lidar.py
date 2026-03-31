@@ -907,14 +907,6 @@ class ElSpiderLidar(ElSpider): # 继承
     #     self.feet_contact_time *= contact_filt
     #     return rew_airTime
 
-    # def _reward_dof_vel_stand_still(self):
-    #     # Penalize motion at zero commands
-    #     return torch.sum(torch.abs(self.dof_vel), dim=1) * (torch.norm(self.commands[:, :3], dim=1) < 0.1)
-
-    # def _reward_dof_pos_stand_still(self):
-    #     # Penalize position deviation at zero commands
-    #     return torch.sum(torch.square(self.dof_pos - self.default_dof_pos), dim=1) * (torch.norm(self.commands[:, :3], dim=1) < 0.1)
-    
     def _reward_feet_contact_stand_still(self):
         # Encourage feet contact with the ground at zero commands
         contacts = self.contact_forces[:, self.feet_indices, 2] > 0.1
@@ -968,10 +960,7 @@ class ElSpiderLidar(ElSpider): # 继承
 
     def _reward_body_joint_contact(self):
         """Penalty for body/joint contacting the ground.原collision"""
-        if not hasattr(self, "penalised_contact_indices") or self.penalised_contact_indices.numel() == 0:
-            return torch.zeros(self.num_envs, device=self.device)
-        contact = torch.norm(self.contact_forces[:, self.penalised_contact_indices, :], dim=-1) > 0.1
-        return torch.sum(contact, dim=1)
+        return torch.sum(1.*(torch.norm(self.contact_forces[:, self.penalised_contact_indices, :], dim=-1) > 0.1), dim=1)
     
     def _reward_lin_vel_z(self):
         # Penalize z axis base linear velocity

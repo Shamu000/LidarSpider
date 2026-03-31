@@ -194,7 +194,7 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
 
         # 雷达初始姿态
         sensor_offset_pos: list = field(default_factory=lambda: [0.3, 0.0, 0.35])  # [x, y, z] in meters
-        sensor_offset_rpy: list = field(default_factory=lambda: [180.0, 0.0, 0.0])  # [roll, pitch, yaw] in degrees
+        sensor_offset_rpy: list = field(default_factory=lambda: [0.0, 0.0, 0.0])  # [roll, pitch, yaw] in degrees
         
         # Range settings
         max_range: float = 50.0
@@ -205,7 +205,7 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
         vertical_line_num: int = 12
         horizontal_fov_deg_min: float = -180
         horizontal_fov_deg_max: float = 180
-        vertical_fov_deg_min: float = -7
+        vertical_fov_deg_min: float = -20
         vertical_fov_deg_max: float = 52
         
         # Height scanner settings (only used when sensor_type is HEIGHT_SCANNER)
@@ -343,7 +343,7 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
         self_collisions = 0 # 1 to disable, 0 to enable...bitwise filter
 
     class rewards(ElSpiderAirRoughTrainCfg.rewards):
-        base_height_target = 0.35
+        base_height_target = 0.28
         max_contact_force = 500.
         only_positive_rewards = True
 
@@ -365,6 +365,7 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
 
         class scales(ElSpiderAirRoughTrainCfg.rewards.scales):
             # Tracking rewards
+            termination = -5.            
             tracking_lin_vel = 1.0
             tracking_ang_vel = 0.5
             foot_acc = [0, 0, 0]
@@ -391,7 +392,6 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
             # feet_contact_forces = [-0.01, -0.05, -0.05]  # Avoid jumping
             body_joint_contact = [-1.0, -2.0, -3.0] # 原collision
             # Misc
-            termination = -5.
             collision = -2.5
             stand_still = -0.
             # dof_vel_stand_still = -1e-4

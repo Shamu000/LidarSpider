@@ -29,7 +29,7 @@
 # Copyright (c) 2021 ETH Zurich, Nikita Rudin
 
 from legged_gym.envs import ElSpiderAirRoughLidarCfg, ElSpiderAirRoughLidarCfgPPO
-
+from legged_gym.envs.elspider_air.mixed_terrains.elspider_air_rough_train_config import ElSpiderAirRoughTrainCfg, ElSpiderAirRoughTrainCfgPPO
 
 class ElSpiderAirFlatLidarCfg(ElSpiderAirRoughLidarCfg):
     class env(ElSpiderAirRoughLidarCfg.env):
@@ -44,10 +44,10 @@ class ElSpiderAirFlatLidarCfg(ElSpiderAirRoughLidarCfg):
         measure_heights = False # 若为true，则要给obs_buf加187维
         draw_lidar_points = True
 
-    class rewards(ElSpiderAirRoughLidarCfg.rewards):
-        base_height_target = 0.30
+    class rewards(ElSpiderAirRoughTrainCfg.rewards):
+        base_height_target = 0.28
         max_contact_force = 500.
-        only_positive_rewards = False
+        only_positive_rewards = True
 
         # Obstacle avoidance parameters
         safe_obstacle_dist = 0.5    # Distance considered safe (meters)
@@ -63,20 +63,21 @@ class ElSpiderAirFlatLidarCfg(ElSpiderAirRoughLidarCfg):
         reward_stage_threshold = 6.0
         # Stage0-1: plane, Stage2: curriculum
         reward_min_stage = 0  # Start from 0
-        reward_max_stage = 0
+        reward_max_stage = 1
 
-        class scales(ElSpiderAirRoughLidarCfg.rewards.scales):
+        class scales(ElSpiderAirRoughTrainCfg.rewards.scales):
             # Tracking rewards
-            tracking_lin_vel = 2.0
-            tracking_ang_vel = 1.5
-            foot_acc = [0, 0, 0]
+            termination = -0.            
+            tracking_lin_vel = 3.5
+            tracking_ang_vel = 2.0
+            foot_acc = 0
             obstacle_avoidance = [1., 1., 1.]
             # Base penalties
-            lin_vel_z = [-1.0, -1.5, -4.0]
+            lin_vel_z = [-1.5, -2.0, -4.0]
             ang_vel_xy = -0.05
             orientation = -5.0
             torques = -0.00001
-            base_height = [-8.0, -8.0, -8.0]
+            base_height = [-12.0, -12.0, -16.0]
             # DOF penalties
             dof_vel = 0.
             dof_acc = -5e-8
@@ -85,34 +86,48 @@ class ElSpiderAirFlatLidarCfg(ElSpiderAirRoughLidarCfg):
             action_rate = [-0.001, -0.001, -0.001]
             action_smoothness = -0
             # Feet penalties
-            feet_slip = [-0.0, -0.4, -1.2]  #脚部打滑惩罚
-            jump_air = 0
-            feet_air_time = 2.0
+            feet_slip = [-0.0, -0.4, -0.4]  #脚部打滑惩罚
+            feet_air_time = 0.8
             feet_stumble = -0.0 # 脚部碰到垂直面的惩罚
             # feet_stumble_liftup = [1.0, 1.0, 2.0] # 脚部碰到垂直面时向上抬起的奖励
             # feet_contact_forces = [-0.01, -0.05, -0.05]  # Avoid jumping
             body_joint_contact = [-1.0, -2.0, -3.0] # 原collision
             # Misc
-            termination = -5.
             collision = -2.5
             stand_still = -0.
-            # dof_vel_stand_still = -1e-4
-            # dof_pos_stand_still = -2e-2
             # feet_contact_stand_still = -0.1
             # Gait
-            # async_gait_scheduler = [-5., -6, -7.]
+            async_gait_scheduler = [-0.4, -0.4, -0.4]
             gait_2_step = [-5.0, -5.0, -5.0]
-            foot_clearance = 0.5
+            # foot_clearance = 0.5
 
         class async_gait_scheduler:
             # Reward for the async gait scheduler
-            dof_align = 0.5 # 关节角度对称/一致性奖励
-            dof_nominal_pos = [0.1, 0.2, 0.2] # 回到参考姿态奖励
-            reward_foot_z_align = [0.2, 0.05, 0.05] # 足端高度一致性奖励（平整度奖励）
+            dof_align = 1.0
+            dof_nominal_pos = [0.0, 0.2]
+            reward_foot_z_align = [0.0, 0.6]
             
         foot_clearance_target = 0.08 # desired foot clearance above ground [m]
         foot_height_offset = 0.0     # height of the foot coordinate origin above ground [m]
         foot_clearance_tracking_sigma = 0.01
+
+    class commands(ElSpiderAirRoughLidarCfg.commands):
+        curriculum = False
+        max_curriculum = 1.
+        # default: lin_vel_x, lin_vel_y, ang_vel_yaw, heading (in heading mode ang_vel_yaw is recomputed from heading error)
+        num_commands = 4
+        resampling_time = 4.  # time before command are changed[s]
+        heading_command = False  # if true: compute ang vel command from heading error
+
+        class ranges(ElSpiderAirRoughLidarCfg.commands.ranges):
+            lin_vel_x = [-1.5, 1.5]  # min max [m/s]
+            lin_vel_y = [-0.6, 0.6]   # min max [m/s]
+            ang_vel_yaw = [-0.6, 0.6]    # min max [rad/s]
+            heading = [-3.14, 3.14]
+
+    class domain_rand(ElSpiderAirRoughLidarCfg.domain_rand):
+        # on ground planes the friction combination mode is averaging, i.e total friction = (foot_friction + 1.)/2.
+        friction_range = [0.5, 1.5]
 
 
 class ElSpiderAirFlatLidarCfgPPO(ElSpiderAirRoughLidarCfgPPO):
@@ -120,6 +135,9 @@ class ElSpiderAirFlatLidarCfgPPO(ElSpiderAirRoughLidarCfgPPO):
 
     class policy(ElSpiderAirRoughLidarCfgPPO.policy):
         init_noise_std = 1.0
+
+    class algorithm(ElSpiderAirRoughLidarCfgPPO.algorithm):
+        entropy_coef = 0.01
 
     class runner(ElSpiderAirRoughLidarCfgPPO.runner):
         run_name = ''
