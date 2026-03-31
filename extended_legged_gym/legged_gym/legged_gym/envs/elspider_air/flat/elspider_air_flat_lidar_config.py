@@ -45,9 +45,9 @@ class ElSpiderAirFlatLidarCfg(ElSpiderAirRoughLidarCfg):
         draw_lidar_points = True
 
     class rewards(ElSpiderAirRoughLidarCfg.rewards):
-        base_height_target = 0.3
+        base_height_target = 0.30
         max_contact_force = 500.
-        only_positive_rewards = True
+        only_positive_rewards = False
 
         # Obstacle avoidance parameters
         safe_obstacle_dist = 0.5    # Distance considered safe (meters)
@@ -63,16 +63,16 @@ class ElSpiderAirFlatLidarCfg(ElSpiderAirRoughLidarCfg):
         reward_stage_threshold = 6.0
         # Stage0-1: plane, Stage2: curriculum
         reward_min_stage = 0  # Start from 0
-        reward_max_stage = 2
+        reward_max_stage = 0
 
         class scales(ElSpiderAirRoughLidarCfg.rewards.scales):
             # Tracking rewards
-            tracking_lin_vel = 1.0
-            tracking_ang_vel = 0.5
+            tracking_lin_vel = 2.0
+            tracking_ang_vel = 1.5
             foot_acc = [0, 0, 0]
             obstacle_avoidance = [1., 1., 1.]
             # Base penalties
-            lin_vel_z = [-2.0, -3.0, -5.0]
+            lin_vel_z = [-1.0, -1.5, -4.0]
             ang_vel_xy = -0.05
             orientation = -5.0
             torques = -0.00001
@@ -83,11 +83,11 @@ class ElSpiderAirFlatLidarCfg(ElSpiderAirRoughLidarCfg):
             dof_pos_limits = -1.0
             # dof_power = -2.e-4
             action_rate = [-0.001, -0.001, -0.001]
-            action_smoothness = -0.01
+            action_smoothness = -0
             # Feet penalties
             feet_slip = [-0.0, -0.4, -1.2]  #脚部打滑惩罚
             jump_air = 0
-            feet_air_time = 0.8
+            feet_air_time = 2.0
             feet_stumble = -0.0 # 脚部碰到垂直面的惩罚
             # feet_stumble_liftup = [1.0, 1.0, 2.0] # 脚部碰到垂直面时向上抬起的奖励
             # feet_contact_forces = [-0.01, -0.05, -0.05]  # Avoid jumping
@@ -102,15 +102,15 @@ class ElSpiderAirFlatLidarCfg(ElSpiderAirRoughLidarCfg):
             # Gait
             # async_gait_scheduler = [-5., -6, -7.]
             gait_2_step = [-5.0, -5.0, -5.0]
-            # foot_clearance = 0.5
+            foot_clearance = 0.5
 
         class async_gait_scheduler:
             # Reward for the async gait scheduler
-            dof_align = 0.5
-            dof_nominal_pos = [0.1, 0.2, 0.2]
-            reward_foot_z_align = [0.2, 0.05, 0.05]
+            dof_align = 0.5 # 关节角度对称/一致性奖励
+            dof_nominal_pos = [0.1, 0.2, 0.2] # 回到参考姿态奖励
+            reward_foot_z_align = [0.2, 0.05, 0.05] # 足端高度一致性奖励（平整度奖励）
             
-        foot_clearance_target = 0.04 # desired foot clearance above ground [m]
+        foot_clearance_target = 0.08 # desired foot clearance above ground [m]
         foot_height_offset = 0.0     # height of the foot coordinate origin above ground [m]
         foot_clearance_tracking_sigma = 0.01
 

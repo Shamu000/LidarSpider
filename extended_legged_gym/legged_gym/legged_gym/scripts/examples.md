@@ -5,14 +5,9 @@ export LD_LIBRARY_PATH=/home/hithcat/miniconda3/envs/fangzhen/lib:$LD_LIBRARY_PA
 
 # 2.训练
 ```bash
-python3 ./extended_legged_gym/legged_gym/legged_gym/scripts/train.py --task=anymal_c_flat --num_envs=1
-
-python3 ./extended_legged_gym/legged_gym/legged_gym/scripts/train.py --task=elspider_air_rough --num_envs=4 --max_iterations=50 
+python3 ./extended_legged_gym/legged_gym/legged_gym/scripts/train.py --task=elspider_air_flat_lidar --num_envs=4 --max_iterations=200
 
 python3 ./extended_legged_gym/legged_gym/legged_gym/scripts/train.py --task=elspider_air_flat_lidar --num_envs=500 --max_iterations=200 --headless
-
-
-
 
 
 python3 ./extended_legged_gym/legged_gym/legged_gym/scripts/train.py --task=elspider_air_rough_lidar --num_envs=4 --max_iterations=100
@@ -30,13 +25,13 @@ python3 ./extended_legged_gym/legged_gym/legged_gym/scripts/train.py --task=elsp
 python3 ./extended_legged_gym/legged_gym/legged_gym/scripts/play.py \
         --task elspider_air_flat_lidar \
         --num_envs 1 \
-        --load_run v1 \
+        --load_run 1 \
         --checkpoint -1
 
 python3 ./extended_legged_gym/legged_gym/legged_gym/scripts/play.py \
         --task elspider_air_rough_lidar \
         --num_envs 1 \
-        --load_run v1 \
+        --load_run 1 \
         --checkpoint -1
 ```
 

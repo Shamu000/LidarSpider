@@ -28,32 +28,9 @@ from legged_gym.utils.math_utils import quat_apply_yaw
 from legged_gym.utils.gym_visualizer import GymVisualizer
 
 from LidarSensor.lidar_sensor import LidarSensor
-from LidarSensor.example.isaacgym.utils.terrain.terrain_lidar import Terrain
+from LidarSensor.example.isaacgym.utils.terrain.terrain import Terrain
 from LidarSensor.example.isaacgym.utils.terrain.terrain_cfg import Terrain_cfg
 from LidarSensor import SENSOR_ROOT_DIR,RESOURCES_DIR
-
-KEY_W = gymapi.KEY_W
-KEY_A = gymapi.KEY_A
-KEY_S = gymapi.KEY_S
-KEY_D = gymapi.KEY_D
-KEY_Q = gymapi.KEY_Q
-KEY_E = gymapi.KEY_E
-KEY_UP = gymapi.KEY_UP
-KEY_DOWN = gymapi.KEY_DOWN
-KEY_LEFT = gymapi.KEY_LEFT
-KEY_RIGHT = gymapi.KEY_RIGHT
-KEY_ESCAPE = gymapi.KEY_ESCAPE
-# KEY_W = ord('w')
-# KEY_A = ord('a')
-# KEY_S = ord('s')
-# KEY_D = ord('d')
-# KEY_Q = ord('q')
-# KEY_E = ord('e')
-# KEY_UP = 273
-# KEY_DOWN = 274
-# KEY_LEFT = 276
-# KEY_RIGHT = 275
-# KEY_ESCAPE = 27
 
 @torch.jit.script
 def quat_from_euler_xyz(roll, pitch, yaw): # 欧拉角转四元数
@@ -69,6 +46,21 @@ def quat_from_euler_xyz(roll, pitch, yaw): # 欧拉角转四元数
     qy = cy * cr * sp + sy * sr * cp
     qz = sy * cr * cp - cy * sr * sp
 
+    return torch.stack([qx, qy, qz, qw], dim=-1)
+
+@torch.jit.script
+def quat_from_euler_xyz_tensor(roll: torch.Tensor, pitch: torch.Tensor, yaw: torch.Tensor) -> torch.Tensor:
+    """Convert euler angles to quaternion (tensor version)"""
+    cy = torch.cos(yaw * 0.5)
+    sy = torch.sin(yaw * 0.5)
+    cr = torch.cos(roll * 0.5)
+    sr = torch.sin(roll * 0.5)
+    cp = torch.cos(pitch * 0.5)
+    sp = torch.sin(pitch * 0.5)
+    qw = cy * cr * cp + sy * sr * sp
+    qx = cy * sr * cp - sy * cr * sp
+    qy = cy * cr * sp + sy * sr * cp
+    qz = sy * cr * cp - cy * sr * sp
     return torch.stack([qx, qy, qz, qw], dim=-1)
 
 # 笛卡尔坐标系到球坐标系转换函数，输入为 (x, y, z)，输出为 (r, theta, phi)
@@ -159,55 +151,42 @@ def euler_from_quaternion(quat_angle):  # 四元数转欧拉角
      
         return roll_x, pitch_y, yaw_z # in radians
     
-def farthest_point_sampling(point_cloud, dist_tensor, sample_size): # 远点采样FPS算法
+def farthest_point_sampling(point_cloud, sample_size):
     """
-    Sample points using the farthest point sampling algorithm
-    Args:
-        point_cloud: Tensor of shape (num_envs, 1, num_points, 3)
-        dist_tensor: Optional tensor of shape (num_envs, 1, num_points)
-        sample_size: Number of points to sample
-    Returns:
-        Downsampled point cloud of shape (num_envs, 1, sample_size, 3)
-        Sampled distances of shape (num_envs, 1, sample_size) if dist_tensor is provided
+    point_cloud: (B, 1, N, 3)
+    return: (B, 1, sample_size, 3)
     """
-    num_envs, _, num_points, _ = point_cloud.shape
+    B, _, N, _ = point_cloud.shape
     device = point_cloud.device
-    result = []
-    dist_result = []
-    
-    for env_idx in range(num_envs):
-        points = point_cloud[env_idx, 0]  # 取第一维是env_idx，第二维是0的数据：(num_points, 3)
-        
-        # Initialize with a random point
-        sampled_indices = torch.zeros(sample_size, dtype=torch.long, device=device)
-        sampled_indices[0] = torch.randint(0, num_points, (1,), device=device) # 随机生成一个形状为(1,)的张量，值在0到num_points之间
-        
-        # Calculate distances
-        distances = torch.norm(points - points[sampled_indices[0]], dim=1)
-        
-        # Iteratively select farthest points
-        for i in range(1, sample_size):
-            # Select the farthest point
-            sampled_indices[i] = torch.argmax(distances) # 得到当前最远点的索引
-            
-            # Update distances
-            if i < sample_size - 1:
-                new_distances = torch.norm(points - points[sampled_indices[i]], dim=1) # 全距离相对上次最远点更新
-                distances = torch.min(distances, new_distances) # 最终结果为各点到采样集合中最近点的距离
-        
-        # Get the sampled points
-        sampled_points = points[sampled_indices] # 保留特征点
-        result.append(sampled_points.unsqueeze(0))  # 新增一个维度，即一个传感器数量：[sample_size, 3]->[1, sample_size, 3]
 
-        # Get the sampled distances if provided
-        if dist_tensor is not None:
-            dists = dist_tensor[env_idx, 0]
-            sampled_dists = dists[sampled_indices]
-            dist_result.append(sampled_dists.unsqueeze(0))
-    
-    if dist_tensor is not None:
-        return torch.stack(result), torch.stack(dist_result)
-    return torch.stack(result)
+    points = point_cloud[:, 0]  # (B, N, 3)
+
+    # 初始化
+    sampled_indices = torch.zeros(B, sample_size, dtype=torch.long, device=device)
+
+    # 每个 batch 随机选一个初始点
+    farthest = torch.randint(0, N, (B,), device=device)
+    sampled_indices[:, 0] = farthest
+
+    # 初始化距离
+    batch_indices = torch.arange(B, device=device)
+    distances = torch.norm(points - points[batch_indices, farthest].unsqueeze(1), dim=2)  # (B, N)
+
+    for i in range(1, sample_size):
+        farthest = torch.argmax(distances, dim=1)
+        sampled_indices[:, i] = farthest
+
+        if i < sample_size - 1:
+            new_dist = torch.norm(points - points[batch_indices, farthest].unsqueeze(1), dim=2)
+            distances = torch.minimum(distances, new_dist)
+
+    # gather points
+    sampled_points = points.gather(
+        1,
+        sampled_indices.unsqueeze(-1).expand(-1, -1, 3)
+    )  # (B, sample_size, 3)
+
+    return sampled_points.unsqueeze(1)
 
 
 def downsample_spherical_points_vectorized(sphere_points, num_theta_bins=10, num_phi_bins=10, max_range: float = 50.0): # 球面坐标点云进行二维角度网格划分
@@ -223,82 +202,44 @@ def downsample_spherical_points_vectorized(sphere_points, num_theta_bins=10, num
         Downsampled points tensor of shape (num_envs, num_theta_bins*num_phi_bins, 3)
     """
     num_envs = sphere_points.shape[0]
-    num_points = sphere_points.shape[1]
     device = sphere_points.device
     num_bins = num_theta_bins * num_phi_bins
     
-    # Define bin ranges
     theta_min, theta_max = -3.14, 3.14
-    phi_min, phi_max = -0.12, 0.908
+    phi_min, phi_max = -0.5, 0.5  # Adjusted for typical LiDAR FOV
     
-    # Extract r, theta, phi for all environments
-    r = sphere_points[:, :, 0]       # [num_envs, num_points]
-    theta = sphere_points[:, :, 1]   # [num_envs, num_points]
-    phi = sphere_points[:, :, 2]     # [num_envs, num_points]
+    r = sphere_points[:, :, 0]
+    theta = sphere_points[:, :, 1]
+    phi = sphere_points[:, :, 2]
     
-    # Compute bin indices for theta and phi
     theta_bin = ((theta - theta_min) / (theta_max - theta_min) * num_theta_bins).long()
     phi_bin = ((phi - phi_min) / (phi_max - phi_min) * num_phi_bins).long()
-    
-    # Clamp to valid bin indices
     theta_bin = torch.clamp(theta_bin, 0, num_theta_bins - 1)
     phi_bin = torch.clamp(phi_bin, 0, num_phi_bins - 1)
+    bin_indices = theta_bin * num_phi_bins + phi_bin
     
-    # Compute linear bin index (flatten 2D bin indices to 1D)
-    bin_indices = theta_bin * num_phi_bins + phi_bin  # [num_envs, num_points]
+    # Preserve the nearest obstacle in each bin. Empty bins stay at max range.
+    min_r = torch.full((num_envs, num_bins), max_range, device=device)
+    min_r.scatter_reduce_(1, bin_indices, r, reduce="amin", include_self=True)
     
-    # Create an environment index tensor to handle multiple environments
-    env_indices = torch.arange(num_envs, device=device).view(-1, 1).expand(-1, num_points)
-    
-    # Flatten tensors for scatter operation
-    flat_bin_indices = bin_indices.reshape(-1)            # [num_envs * num_points]
-    flat_env_indices = env_indices.reshape(-1)            # [num_envs * num_points]
-    flat_r = r.view(-1)                               # [num_envs * num_points]
-    
-    # Create 2D indices for scatter operation (env_idx, bin_idx)
-    scatter_indices = torch.stack([flat_env_indices, flat_bin_indices], dim=1)  # [num_envs * num_points, 2]
-    
-    # Prepare tensors for scatter operations
-    r_sum = torch.zeros(num_envs, num_bins, device=device)
-    bin_count = torch.zeros(num_envs, num_bins, device=device)
-    
-    # Use scatter_add_ to compute sum and count for each bin
-    r_sum.scatter_add_(1, bin_indices, r)
-    ones = torch.ones_like(r)
-    bin_count.scatter_add_(1, bin_indices, ones)
-
-    # Keep raw counts to identify empty bins
-    bin_count_raw = bin_count.clone()
-    safe_bin_count = torch.clamp(bin_count_raw, min=1.0)
-
-    # Compute average r per bin; for empty bins set to max_range (meaning no hit)
-    avg_r = r_sum / safe_bin_count  # [num_envs, num_bins]
-    avg_r = torch.where(bin_count_raw > 0, avg_r, torch.full_like(avg_r, max_range))
-    
-    # Create bin centers for theta and phi
     theta_centers = torch.linspace(
         theta_min + (theta_max - theta_min) / (2 * num_theta_bins),
         theta_max - (theta_max - theta_min) / (2 * num_theta_bins),
         num_theta_bins, device=device
     )
-    
     phi_centers = torch.linspace(
         phi_min + (phi_max - phi_min) / (2 * num_phi_bins),
         phi_max - (phi_max - phi_min) / (2 * num_phi_bins),
         num_phi_bins, device=device
     )
-    
-    # Create meshgrid of bin centers
     theta_grid, phi_grid = torch.meshgrid(theta_centers, phi_centers, indexing='ij')
-    theta_centers_flat = theta_grid.reshape(-1)  # [num_bins]
-    phi_centers_flat = phi_grid.reshape(-1)      # [num_bins]
+    theta_centers_flat = theta_grid.reshape(-1)
+    phi_centers_flat = phi_grid.reshape(-1)
     
-    # Create final output tensor
     downsampled = torch.zeros(num_envs, num_bins, 3, device=device)
-    downsampled[:, :, 0] = avg_r                              # r values
-    downsampled[:, :, 1] = theta_centers_flat.unsqueeze(0)    # theta values
-    downsampled[:, :, 2] = phi_centers_flat.unsqueeze(0)      # phi values
-    
+    downsampled[:, :, 0] = min_r
+    downsampled[:, :, 1] = theta_centers_flat.unsqueeze(0)
+    downsampled[:, :, 2] = phi_centers_flat.unsqueeze(0)
     return downsampled
 
 # 让机器人学习通用行走
@@ -313,24 +254,11 @@ class ElSpiderLidar(ElSpider): # 继承
         self._init_lidar_sensor()
 
     def _init_lidar_cfg(self, sensor_cfg: ElSpiderAirRoughLidarCfg.LidarConfig):
-        self.sensor_cfg = sensor_cfg
         """Initialize a minimal lidar sensor environment."""
         self.sensor_cfg = sensor_cfg # Lidar 配置对象
-        self.sensor_cfg.sensor_type = self.cfg.LidarType.MID360 # mid360,horizon,HAP,mid70,mid40,tele,avia
         self.sim_time = 0 # 记录仿真时间
         self.sensor_update_time = 0 # 记录传感器更新时间
         self.state_update_time = 0 # 传感器更新时间，超过阈值后更新并清空
-        self.sensor_cfg.update_frequency = 10.0 # 传感器更新频率
-        self.sensor_cfg.max_range = 50.0
-        self.sensor_cfg.min_range = 0.1
-        self.sensor_cfg.horizontal_line_num = 40
-        self.sensor_cfg.vertical_line_num = 50
-        self.sensor_cfg.horizontal_fov_deg_min = -180
-        self.sensor_cfg.horizontal_fov_deg_max = 180
-        self.sensor_cfg.vertical_fov_deg_min = -2
-        self.sensor_cfg.vertical_fov_deg_max = 57
-        self.sensor_cfg.dt = 0.1 # 传感器时间步长(TODO: 与sim对应吗？)
-        self.sensor_cfg.pointcloud_in_world_frame = False # 点云数据是否在世界坐标系下
         self.num_theta_bins = 12
         self.num_phi_bins = 8
 
@@ -366,95 +294,60 @@ class ElSpiderLidar(ElSpider): # 继承
         # self.create_viewer()
 
         self._init_buffer() # 绑定 Isaac Gym root state，与 GPU 张量同步
-        self.create_warp_env() # Warp 格式的 mesh 用于 Lidar 仿真
+        self._create_warp_mesh() # Warp 格式的 mesh 用于 Lidar 仿真
 
-        self.create_warp_tensor() # GPU 张量（点云输出/距离输出/姿态）
+        self._create_warp_tensor_dict() # GPU 张量（点云输出/距离输出/姿态）
         
         self.sensor = LidarSensor(self.warp_tensor_dict, None, self.sensor_cfg, 1, self.device)
-        self.lidar_update_counter = 0
-        self.lidar_update_interval = self._get_lidar_update_interval()
+        # self.lidar_update_interval = self._get_lidar_update_interval()
 
         # sensor_points_tensor:形状为 (num_envs, num_sensors, V, H, 3) 的点云(x, y, z)
         # sensor_dist_tensor:形状为 (num_envs, num_sensors, V, H) 的距离图(depth map)
         self.sensor.capture()
         self.sensor_points_tensor, self.sensor_dist_tensor = self.sensor.update() # 雷达扫描
-
-        # Initialize keyboard state dictionary
-        self.key_pressed = {}
         
-        # Movement and rotation speeds 运动速度初始化
-        self.linear_speed = 0.0  # m/s
-        self.angular_speed = 0.0  # rad/s
-        self.selected_env_idx = 0  # Environment to control (default to env 0 as in your draw code)
-        
-        # Initialize random movement parameters
-        self.enable_random_movement = False
-        self.movement_update_interval = 0.2  # Generate new target every 3 seconds
-        self.movement_speed = 2.0  # Movement speed scalar
-        self.rotation_speed = 1.0  # Rotation speed scalar
-        
-            
-        if self.viewer:# 订阅所有需要的键
-            self.gym.subscribe_viewer_keyboard_event(self.viewer, KEY_W,"move_forward")
-            self.gym.subscribe_viewer_keyboard_event(self.viewer, KEY_A,"move_left")
-            self.gym.subscribe_viewer_keyboard_event(self.viewer, KEY_S,"move_backward")
-            self.gym.subscribe_viewer_keyboard_event(self.viewer, KEY_D,"move_right")
-            self.gym.subscribe_viewer_keyboard_event(self.viewer, KEY_Q,"move_up")
-            self.gym.subscribe_viewer_keyboard_event(self.viewer, KEY_E,"move_down")
-            self.gym.subscribe_viewer_keyboard_event(self.viewer, KEY_UP,"rotate_up")
-            self.gym.subscribe_viewer_keyboard_event(self.viewer, KEY_DOWN,"rotate_down")
-            self.gym.subscribe_viewer_keyboard_event(self.viewer, KEY_LEFT,"rotate_left")
-            self.gym.subscribe_viewer_keyboard_event(self.viewer, KEY_RIGHT,"rotate_right")
-            self.gym.subscribe_viewer_keyboard_event(self.viewer, KEY_ESCAPE,"exit")
-        
-        # Print control instructions
-        print("Keyboard controls:")
-        print("  WASD: Move robot horizontally")
-        print("  Q/E: Move robot up/down")
-        print("  Arrow keys: Rotate robot")
-        print("  ESC: Exit simulation")
 
-    def create_sim(self):
-        """Create a Genesis simulation."""
-        # configure sim
-        self.up_axis_idx = 2  # 2 for z, 1 for y -> adapt gravity accordingly
+    # def create_sim(self):
+    #     """Create a Genesis simulation."""
+    #     # configure sim
+    #     self.up_axis_idx = 2  # 2 for z, 1 for y -> adapt gravity accordingly
 
-        self.sim = self.gym.create_sim(self.sim_device_id, self.graphics_device_id, self.physics_engine, self.sim_params)
-        if self.sim is None:
-            print("*** Failed to create sim")
-            quit()
+    #     self.sim = self.gym.create_sim(self.sim_device_id, self.graphics_device_id, self.physics_engine, self.sim_params)
+    #     if self.sim is None:
+    #         print("*** Failed to create sim")
+    #         quit()
 
-        mesh_type = self.cfg.terrain.mesh_type
-        self.terrain_cfg = ElSpiderAirRoughLidarCfg.terrain()
-        self.terrain = Terrain(self.terrain_cfg, self.num_envs)
+    #     mesh_type = self.cfg.terrain.mesh_type
+    #     self.terrain_cfg = ElSpiderAirRoughLidarCfg.terrain()
+    #     self.terrain = Terrain(self.terrain_cfg, self.num_envs)
 
-        if mesh_type == 'plane':
-            self._create_ground_plane()
-        elif mesh_type == 'heightfield':
-            self._create_heightfield()
-        elif mesh_type in ['trimesh', 'confined_trimesh']:
-            self._create_trimesh()
-        elif mesh_type is not None:
-            raise ValueError("Terrain mesh type not recognised. Allowed types are [None, plane, heightfield, trimesh, confined_trimesh]")
+    #     if mesh_type == 'plane':
+    #         self._create_ground_plane()
+    #     elif mesh_type == 'heightfield':
+    #         self._create_heightfield()
+    #     elif mesh_type in ['trimesh', 'confined_trimesh']:
+    #         self._create_trimesh()
+    #     elif mesh_type is not None:
+    #         raise ValueError("Terrain mesh type not recognised. Allowed types are [None, plane, heightfield, trimesh, confined_trimesh]")
 
-        self._create_envs()
-        self._setup_enhanced_lighting()
+    #     self._create_envs()
+    #     self._setup_enhanced_lighting()
 
-        # Initialize obstacle config (will be used in create_sim)
-        self.obstacle_config = None
-        if hasattr(self.cfg, 'obstacle_gen') and self.cfg.obstacle_gen.enable_obstacles:
-            self.obstacle_config = ObstacleGenConfig()
-            # Apply custom settings from config
-            self.obstacle_config.min_stones_per_env = self.cfg.obstacle_gen.min_obstacles
-            self.obstacle_config.max_stones_per_env = self.cfg.obstacle_gen.max_obstacles
-            self.obstacle_config.spawn_height_range = self.cfg.obstacle_gen.spawn_height_range
-            self.obstacle_config.spawn_radius_range = self.cfg.obstacle_gen.spawn_radius_range
-            self.obstacle_config.density_range = self.cfg.obstacle_gen.stone_density_range
-            self.obstacle_config.friction_range = self.cfg.obstacle_gen.stone_friction_range
-            self.obstacle_config.restitution_range = self.cfg.obstacle_gen.stone_restitution_range
-            self.obstacle_config.cluster_probability = self.cfg.obstacle_gen.cluster_probability
-            self.obstacle_gen = ObstacleGen(self.gym, self.sim, self.envs, self.obstacle_config)
-            self.obstacle_gen.generate_stones()
+    #     # Initialize obstacle config (will be used in create_sim)
+    #     self.obstacle_config = None
+    #     if hasattr(self.cfg, 'obstacle_gen') and self.cfg.obstacle_gen.enable_obstacles:
+    #         self.obstacle_config = ObstacleGenConfig()
+    #         # Apply custom settings from config
+    #         self.obstacle_config.min_stones_per_env = self.cfg.obstacle_gen.min_obstacles
+    #         self.obstacle_config.max_stones_per_env = self.cfg.obstacle_gen.max_obstacles
+    #         self.obstacle_config.spawn_height_range = self.cfg.obstacle_gen.spawn_height_range
+    #         self.obstacle_config.spawn_radius_range = self.cfg.obstacle_gen.spawn_radius_range
+    #         self.obstacle_config.density_range = self.cfg.obstacle_gen.stone_density_range
+    #         self.obstacle_config.friction_range = self.cfg.obstacle_gen.stone_friction_range
+    #         self.obstacle_config.restitution_range = self.cfg.obstacle_gen.stone_restitution_range
+    #         self.obstacle_config.cluster_probability = self.cfg.obstacle_gen.cluster_probability
+    #         self.obstacle_gen = ObstacleGen(self.gym, self.sim, self.envs, self.obstacle_config)
+    #         self.obstacle_gen.generate_stones()
         
     def _init_buffer(self):
         """Initialize buffers including LiDAR observation buffers."""
@@ -509,80 +402,56 @@ class ElSpiderLidar(ElSpider): # 继承
             self.num_envs, device=self.device, requires_grad=False
         ) * self.sensor_cfg.max_range
         
-        self.sensor_translation = torch.tensor([0.3, 0., 0.1], device=self.device).repeat((self.num_envs, 1)) # 重点：把传感器放置在正确位置
-        rpy_offset = torch.tensor([3.14, 0., 0], device=self.device) # 传感器的固定姿态偏移
-        self.sensor_offset_quat = quat_from_euler_xyz(rpy_offset[0], rpy_offset[1], rpy_offset[2]).repeat((self.num_envs, 1))
-
     # 创建warp格式的环境网格
-    def create_warp_env(self):
-        terrain_mesh = trimesh.Trimesh(vertices=self.terrain.vertices, faces=self.terrain.triangles)
-        #save terrain mesh
-        # transform = np.zeros((3,))
-        # transform[0] = -self.terrain_cfg.border_size 
-        # transform[1] = -self.terrain_cfg.border_size
-        # transform[2] = 0.0
-        # translation = trimesh.transformations.translation_matrix(transform)
-        # terrain_mesh.apply_transform(translation)
-
-        # current_script_dir = os.path.dirname(os.path.abspath(__file__))
+    def _create_warp_mesh(self):
+        """Create WARP mesh from terrain for ray casting."""
+        wp.init()
         
-        
-        # two_levels_up = os.path.dirname(os.path.dirname(os.path.dirname(current_script_dir)))
-        
-        
-        # obstacle_mesh_path = os.path.join(two_levels_up, "resources", "robots","el_mini", "robot_combined.stl")
-        
-        # # obstacle_mesh = trimesh.load(obstacle_mesh_path)
-        # obstacle_mesh = trimesh.load(obstacle_mesh_path, force='mesh')
-
-        # # trimesh.load may still return a Scene (e.g., OBJ/GLTF with multiple meshes)
-        # if isinstance(obstacle_mesh, trimesh.Scene):
-        #     obstacle_mesh = trimesh.util.concatenate(
-        #         tuple(
-        #             geom for geom in obstacle_mesh.geometry.values()
-        #             if isinstance(geom, trimesh.Trimesh)
-        #         )
-        #     )
-
-
-        #     #obstacle_mesh = trimesh.load(self.terrain_cfg.obstacle_config.obstacle_root_path+"/human/meshes/Male.OBJ")
-        # transaltion = np.zeros((3,))
-        # transaltion[0]=self.root_states[0,0]
-        # transaltion[1]=self.root_states[0,1]
-        # transaltion[2]=self.root_states[0,2]
-        # # quat = self.root_states[0,3:7].numpy()
-        # # rotation = trimesh.transformations.quaternion_matrix(quat)
-        # translation = trimesh.transformations.translation_matrix(transaltion)
-            
-        # obstacle_mesh.apply_transform(translation)
-
-        # combine_mesh = trimesh.util.concatenate([terrain_mesh, obstacle_mesh])
-
-        # 机身不遮挡雷达
-        combine_mesh = terrain_mesh
-
-        #save combined mesh
-        #combine_mesh.export("robot_terrain_combined.stl")
-        vertices = combine_mesh.vertices
-        triangles = combine_mesh.faces
-        vertex_tensor = torch.tensor( 
-                vertices,
-                device=self.device,
-                requires_grad=False,
-                dtype=torch.float32,
-            )
-        
-        #if none type in vertex_tensor
-        if vertex_tensor.any() is None:
-            print("vertex_tensor is None")
-        vertex_vec3_array = wp.from_torch(vertex_tensor,dtype=wp.vec3)        
-        faces_wp_int32_array = wp.from_numpy(triangles.flatten(), dtype=wp.int32,device=self.device)
+        # Get terrain mesh vertices and triangles
+        if hasattr(self, 'terrain') and self.terrain is not None:
+            if hasattr(self.terrain, 'vertices') and self.terrain.vertices is not None:
+                vertices = self.terrain.vertices.copy()
+                triangles = self.terrain.triangles.copy()
                 
-        self.wp_meshes =  wp.Mesh(points=vertex_vec3_array,indices=faces_wp_int32_array)
+                # Apply terrain offset
+                if hasattr(self.cfg.terrain, 'border_size'):
+                    vertices[:, 0] -= self.cfg.terrain.border_size
+                    vertices[:, 1] -= self.cfg.terrain.border_size
+            else:
+                # Create simple ground plane if no terrain mesh
+                vertices = np.array([
+                    [-50, -50, 0],
+                    [50, -50, 0],
+                    [50, 50, 0],
+                    [-50, 50, 0]
+                ], dtype=np.float32)
+                triangles = np.array([
+                    [0, 1, 2],
+                    [0, 2, 3]
+                ], dtype=np.int32)
+        else:
+            # Create simple ground plane
+            vertices = np.array([
+                [-50, -50, 0],
+                [50, -50, 0],
+                [50, 50, 0],
+                [-50, 50, 0]
+            ], dtype=np.float32)
+            triangles = np.array([
+                [0, 1, 2],
+                [0, 2, 3]
+            ], dtype=np.int32)
         
-        self.mesh_ids = self.mesh_ids_array = wp.array([self.wp_meshes.id], dtype=wp.uint64)
+        # Convert to WARP arrays
+        vertex_tensor = torch.tensor(vertices, device=self.device, dtype=torch.float32)
+        vertex_wp = wp.from_torch(vertex_tensor, dtype=wp.vec3)
+        faces_wp = wp.from_numpy(triangles.flatten().astype(np.int32), dtype=wp.int32, device=self.device)
+        
+        # Create WARP mesh
+        self.wp_mesh = wp.Mesh(points=vertex_wp, indices=faces_wp)
+        self.mesh_ids = wp.array([self.wp_mesh.id], dtype=wp.uint64)
 
-    def create_warp_tensor(self):
+    def _create_warp_tensor_dict(self):
         self.warp_tensor_dict={}
         self.sensor_points_tensor = torch.zeros(
                 (
@@ -606,22 +475,38 @@ class ElSpiderLidar(ElSpider): # 继承
                 requires_grad=False,
             ) 
         # self.mesh_ids = self.mesh_ids_array = wp.array(self.warp_mesh_id_list, dtype=wp.uint64)
-        # 定义传感器位姿（位置和朝向）
-        self.sensor_pos_tensor = torch.zeros_like(self.root_states[:, 0:3])
-        self.sensor_quat_tensor = torch.zeros_like(self.root_states[:, 3:7])
+        # 定义传感器位姿（位置和朝向)
+        self.sensor_pos_tensor = torch.zeros(self.num_envs, 3, device=self.device)
+        self.sensor_quat_tensor = torch.zeros(self.num_envs, 4, device=self.device)
         
         # 传感器相对于载体的安装偏移
         offset_pos = getattr(self.cfg.LidarConfig, "sensor_offset_pos", None)
         if offset_pos is None:
             offset_pos = [0.3, 0.0, 0.35]
-        offset_rpy = getattr(self.cfg.LidarConfig, "sensor_offset_rpy", None)
-        if offset_rpy is None:
-            offset_rpy = [3.14, 0.0, 0.0]
 
-        self.sensor_translation = torch.tensor(offset_pos, device=self.device).repeat((self.num_envs, 1))
-        rpy_offset = torch.tensor(offset_rpy, device=self.device, dtype=torch.float32)
-        self.sensor_offset_quat = quat_from_euler_xyz(rpy_offset[0], rpy_offset[1], rpy_offset[2]).repeat((self.num_envs, 1))
+        if hasattr(self.cfg, 'LidarConfig') and hasattr(self.cfg.LidarConfig, 'sensor_offset_pos'):
+            self.sensor_translation_local = torch.tensor(
+                self.cfg.LidarConfig.sensor_offset_pos, device=self.device
+            )
+        else:
+            self.sensor_translation_local = torch.tensor([0.3, 0.0, 0.35], device=self.device)
 
+        if hasattr(self.cfg, 'LidarConfig') and hasattr(self.cfg.LidarConfig, 'sensor_offset_rpy'):
+            roll = np.deg2rad(self.cfg.LidarConfig.sensor_offset_rpy[0])
+            pitch = np.deg2rad(self.cfg.LidarConfig.sensor_offset_rpy[1])
+            yaw = np.deg2rad(self.cfg.LidarConfig.sensor_offset_rpy[2])
+            self.sensor_offset_quat_local = quat_from_euler_xyz_tensor(
+                torch.tensor([roll], device=self.device),
+                torch.tensor([pitch], device=self.device),
+                torch.tensor([yaw], device=self.device)
+            ).squeeze()
+        else:
+            self.sensor_offset_quat_local = torch.tensor([0.0, 0.0, 0.0, 1.0], device=self.device)
+
+        self.sensor_translation = self.sensor_translation_local.repeat(self.num_envs, 1)
+        self.sensor_offset_quat = self.sensor_offset_quat_local.repeat(self.num_envs, 1)
+
+        self._update_lidar_pose()
         
         self.warp_tensor_dict["sensor_dist_tensor"] = self.sensor_dist_tensor
         self.warp_tensor_dict['device'] = self.device
@@ -650,121 +535,6 @@ class ElSpiderLidar(ElSpider): # 继承
             
             self.vis = GymVisualizer(self.gym, self.sim, self.viewer, self.envs)
 
-
-    # keyboard 控制机器人移动
-    def keyboard_input(self):
-        """Process keyboard input to move the robot"""
-        # 在没有查看器的情况下直接返回，因为无法获取键盘输入
-        if not self.viewer:
-            return True
-        
-        # 处理自上次调用以来的所有事件
-        for evt in self.gym.query_viewer_action_events(self.viewer):
-            print(f"Key event: action={evt.action}, value={evt.value}")  # 调试信息
-            
-            # 处理按键事件 - 当值大于0时表示按下，等于0时表示释放
-            if evt.action == "move_forward":
-                self.key_pressed[KEY_W] = evt.value > 0
-            elif evt.action == "move_backward":
-                self.key_pressed[KEY_S] = evt.value > 0
-            elif evt.action == "move_left":
-                self.key_pressed[KEY_A] = evt.value > 0
-            elif evt.action == "move_right":
-                self.key_pressed[KEY_D] = evt.value > 0
-            elif evt.action == "move_up":
-                self.key_pressed[KEY_Q] = evt.value > 0
-            elif evt.action == "move_down":
-                self.key_pressed[KEY_E] = evt.value > 0
-            elif evt.action == "rotate_up":
-                self.key_pressed[KEY_UP] = evt.value > 0
-            elif evt.action == "rotate_down":
-                self.key_pressed[KEY_DOWN] = evt.value > 0
-            elif evt.action == "rotate_left":
-                self.key_pressed[KEY_LEFT] = evt.value > 0
-            elif evt.action == "rotate_right":
-                self.key_pressed[KEY_RIGHT] = evt.value > 0
-            elif evt.action == "exit" and evt.value > 0:
-                print("Exiting simulation")
-                return False
-        
-        # 固定时间步长（与模拟一致）
-        dt = 0.005
-        
-        # 获取选定机器人的当前状态
-        env_idx = self.selected_env_idx
-        current_pos = self.root_states[env_idx, 0:3].clone()
-        current_quat = self.root_states[env_idx, 3:7].clone()
-        
-        # 设置速度 (每次调用时设置固定速度，而不是累加)
-        self.linear_speed = 3.0  # 1 m/s
-        self.angular_speed = 3.0  # 1 rad/s
-        
-        # 初始化速度向量 - 始终从零开始以响应当前按键状态
-        linear_vel = torch.zeros(3, device=self.device)
-        euler_rates = torch.zeros(3, device=self.device)
-        
-        # 处理按键状态 - 设置当前速度
-        # 前后移动
-        if self.key_pressed.get(KEY_W, False):
-            linear_vel[0] = self.linear_speed
-        if self.key_pressed.get(KEY_S, False):
-            linear_vel[0] = -self.linear_speed
-            
-        # 左右移动
-        if self.key_pressed.get(KEY_A, False):
-            linear_vel[1] = -self.linear_speed
-        if self.key_pressed.get(KEY_D, False):
-            linear_vel[1] = self.linear_speed
-            
-        # 上下移动
-        if self.key_pressed.get(KEY_Q, False):
-            linear_vel[2] = self.linear_speed
-        if self.key_pressed.get(KEY_E, False):
-            linear_vel[2] = -self.linear_speed
-            
-        # 旋转控制（偏航）
-        if self.key_pressed.get(KEY_LEFT, False):
-            euler_rates[2] = self.angular_speed
-        if self.key_pressed.get(KEY_RIGHT, False):
-            euler_rates[2] = -self.angular_speed
-            
-        # 旋转控制（俯仰）
-        if self.key_pressed.get(KEY_UP, False):
-            euler_rates[1] = self.angular_speed
-        if self.key_pressed.get(KEY_DOWN, False):
-            euler_rates[1] = -self.angular_speed
-        
-        # 将局部线性速度转换为全局速度
-        global_vel = quat_apply(current_quat, linear_vel)
-        
-        # 应用移动 - 根据当前速度和时间步长计算位移
-        new_pos = current_pos + global_vel * dt
-        
-        # 应用旋转（将欧拉角速率转换为四元数变化）
-        roll, pitch, yaw = euler_from_quaternion(current_quat.unsqueeze(0))
-        
-        # 更新欧拉角 - 根据当前角速度和时间步长计算角度变化
-        roll = roll + euler_rates[0] * dt
-        pitch = pitch + euler_rates[1] * dt
-        yaw = yaw + euler_rates[2] * dt
-        
-        # 转换回四元数
-        new_quat = quat_from_euler_xyz(roll, pitch, yaw)
-        
-        # 更新机器人状态
-        self.root_states[env_idx, 0:3] = new_pos
-        self.root_states[env_idx, 3:7] = new_quat
-        
-        # 应用更改到模拟
-        env_ids_int32 = torch.tensor([env_idx], dtype=torch.int32, device=self.device)
-        self.gym.set_actor_root_state_tensor_indexed(
-            self.sim,
-            gymtorch.unwrap_tensor(self.root_states),
-            gymtorch.unwrap_tensor(env_ids_int32), 
-            len(env_ids_int32)
-        )
-        
-        return True  # 继续模拟
 
     def collect_and_save_data(self):
         """收集当前时刻的数据并添加到存储列表"""
@@ -862,6 +632,7 @@ class ElSpiderLidar(ElSpider): # 继承
 
     #     self.gym.write_viewer_image_to_file(self.viewer,rgb_image_filename)
 
+
     def post_physics_step(self):
         """ check terminations, compute observations and rewards
             calls self._post_physics_step_callback() for common computations
@@ -923,27 +694,41 @@ class ElSpiderLidar(ElSpider): # 继承
         self.sensor_update_time += self.dt
         self.state_update_time += self.dt
         self.save_time += self.dt
-        
 
-        if self.lidar_update_counter % self.lidar_update_interval == 0:
-            self.sensor_points_tensor, self.sensor_dist_tensor = self.sensor.update()
+        self.sensor_points_tensor, self.sensor_dist_tensor = self.sensor.update()
+        self.sensor_points_tensor = self.sensor_points_tensor.contiguous().view(self.num_envs, 1, -1, 3)
+        self.sensor_dist_tensor = self.sensor_dist_tensor.contiguous().view(self.num_envs, 1, -1)
 
-            # Reshape data: (num_envs, num_sensors, v_lines, h_lines, 3) -> (num_envs, total_rays, 3)
-            # 远点采样，用于绘制点云
-            # total_rays = self.sensor_cfg.horizontal_line_num * self.sensor_cfg.vertical_line_num
-            # print(f"sensor_points_tensor shape: {self.sensor_points_tensor.shape}, sensor_dist_tensor shape: {self.sensor_dist_tensor.shape}")
-            # # Use total_rays when reshaping (was using only one dimension previously)
-            # self.downsampled_cloud, self.downsampled_dist = farthest_point_sampling(
-            #     self.sensor_points_tensor.view(self.num_envs, 1, total_rays, 3),
-            #     dist_tensor=self.sensor_dist_tensor.view(self.num_envs, 1, total_rays),
-            #     sample_size=total_rays
-            # )
+        total_rays = self.sensor_cfg.horizontal_line_num * self.sensor_cfg.vertical_line_num
+        # 远点采样，用于绘制点云
+        # if self.cfg.terrain.draw_lidar_points:
+        #     if self.sensor_points_tensor.shape[1] > 0:
+        #         self.downsampled_cloud = farthest_point_sampling(
+        #             self.sensor_points_tensor, sample_size=total_rays
+        #         )
+        #     else:
+        #         self.downsampled_cloud = torch.zeros(
+        #             self.num_envs,1 , 1, 3, device=self.device, requires_grad=False
+        #         )
 
-        self.lidar_update_counter += 1
+        used_rays = min(total_rays, self.sensor_points_tensor.shape[2])
 
-        # Compute minimum obstacle distance 用于检查是否重置
+        self.lidar_points_buf.zero_()
+        self.lidar_dist_buf.fill_(self.sensor_cfg.max_range)
+        self.lidar_points_buf[:, :used_rays, :] = self.sensor_points_tensor.squeeze(1)[:, :used_rays, :]
+        self.lidar_dist_buf[:, :used_rays] = self.sensor_dist_tensor.squeeze(1)[:, :used_rays]
 
-        # Compute minimum obstacle distance: treat non-hits (<=0) or distances >= max_range as no-hit
+        # valid_hit = (self.lidar_dist_buf > self.sensor_cfg.min_range) & (
+        #     self.lidar_dist_buf < self.sensor_cfg.max_range
+        # )
+        # clamped_dist = torch.where(
+        #     valid_hit,
+        #     self.lidar_dist_buf,
+        #     torch.full_like(self.lidar_dist_buf, self.sensor_cfg.max_range)
+        # )
+        # self.min_obstacle_dist[:] = clamped_dist.min(dim=1)[0]
+
+        # Compute minimum obstacle distance: 用于检查是否重置
         dist_flat = self.sensor_dist_tensor.view(self.num_envs, -1)
         maxr = float(self.sensor_cfg.max_range)
         # Replace invalid distances with max_range so min will be max_range when no valid returns
@@ -951,20 +736,9 @@ class ElSpiderLidar(ElSpider): # 继承
         self.min_obstacle_dist[:] = torch.min(dist_flat_clean, dim=1).values
 
 
-        sphere_points = cart2sphere(self.sensor_points_tensor.view(self.num_envs, -1, 3)).view(self.num_envs, -1, 3)
-
-        # 用于绘制点云
-        if self.cfg.terrain.draw_lidar_points:
-            lidar_downsampled_points = downsample_spherical_points_vectorized(
-                sphere_points, 100, 20, max_range=self.sensor_cfg.max_range
-            )
-            lidar_downsampled_points[:, :, 0] = lidar_downsampled_points[:, :, 0].clamp(0, self.sensor_cfg.max_range)
-            self.downsampled_cloud = sphere2cart(lidar_downsampled_points.view(self.num_envs, -1, 3)).view(self.num_envs, -1, 3).unsqueeze(1)
-            # self.lidar_points_buf[:] = sphere2cart(lidar_downsampled_points.view(self.num_envs, -1, 3)).view(self.num_envs, -1, 3)
-            # self.lidar_dist_buf[:] = lidar_downsampled_points[:, :, 0].view(self.num_envs, -1)
-        
+        sphere_points = cart2sphere(self.lidar_points_buf).view(self.num_envs, -1, 3)
         downsampled = downsample_spherical_points_vectorized(
-            sphere_points, self.num_theta_bins, self.num_phi_bins, max_range=self.sensor_cfg.max_range
+            sphere_points, self.num_theta_bins, self.num_phi_bins, self.sensor_cfg.max_range
         )
         
         # 用于训练
@@ -1016,7 +790,6 @@ class ElSpiderLidar(ElSpider): # 继承
                                   self.base_ang_vel * self.obs_scales.ang_vel,
                                   self.projected_gravity,
                                   self.commands[:, :3] * self.commands_scale,
-                                  self.commands[:, 4:],  # TODO: 确保commands的第四位开始真的有数据
                                   (self.dof_pos - self.default_dof_pos) * self.obs_scales.dof_pos,
                                   self.dof_vel * self.obs_scales.dof_vel,
                                   self.actions
@@ -1068,10 +841,14 @@ class ElSpiderLidar(ElSpider): # 继承
         return noise_vec
 
     def _update_lidar_pose(self) -> None:
-        sensor_quat = quat_mul(self.base_quat, self.sensor_offset_quat)
-        sensor_pos = self.base_pos + quat_apply(self.base_quat, self.sensor_translation)
-        self.sensor_pos_tensor[:] = sensor_pos
-        self.sensor_quat_tensor[:] = sensor_quat
+        self.sensor_pos_tensor[:] = self.root_states[:, :3] + quat_apply(
+            self.root_states[:, 3:7], self.sensor_translation
+        )
+        
+        # Compute sensor orientation in world frame
+        self.sensor_quat_tensor[:] = quat_mul(
+            self.root_states[:, 3:7], self.sensor_offset_quat
+        )
 
     def update_reward_scales(self, mean_reward):
         if mean_reward > self.cfg.rewards.reward_stage_threshold and \
@@ -1199,7 +976,6 @@ class ElSpiderLidar(ElSpider): # 继承
     def _reward_lin_vel_z(self):
         # Penalize z axis base linear velocity
         return torch.square(self.base_lin_vel[:, 2])
-    
 
 
     # def _reward_exploration(self):
@@ -1218,54 +994,82 @@ class ElSpiderLidar(ElSpider): # 继承
         super()._draw_debug_vis()
         
         # Draw LiDAR points for first environment
-        if self.cfg.terrain.draw_lidar_points and not self.headless and hasattr(self, 'lidar_points_buf') and self.sensor_update_time > 1/self.sensor_cfg.update_frequency:
-            self.gym.clear_lines(self.viewer)
+        # if self.cfg.terrain.draw_lidar_points and not self.headless and self.sensor_update_time > 1/self.sensor_cfg.update_frequency:
+        if self.cfg.terrain.draw_lidar_points and not self.headless:
+            # self.gym.clear_lines(self.viewer)
             self._draw_lidar_points()
-            #self._draw_sphere_vis() wait fix
-            #self._draw_height_samples()
             self.sensor_update_time=0
-            
-            # if self.publish_ros:
-            #     self.publish_point_cloud()
-            #     # 处理ROS消息
-            #     rclpy.spin_once(self.ros_node, timeout_sec=0)
         
     def _draw_lidar_points(self):
         """Visualize LiDAR point cloud."""
         if not hasattr(self, 'viewer') or self.viewer is None:
             return
 
-        sphere_geom = gymutil.WireframeSphereGeometry(0.02, 4, 4, None, color=(0, 1, 0))
+        # sphere_geom = gymutil.WireframeSphereGeometry(0.02, 4, 4, None, color=(0, 1, 0))
 
-        if self.sensor_cfg.pointcloud_in_world_frame:
-            self.global_pixels =  self.downsampled_cloud
-            for i in range(self.selected_env_idx,self.selected_env_idx+1):
-                for j in range(int(self.global_pixels.shape[2])):
-                    for k in range(self.global_pixels.shape[3]):
-                        x = self.global_pixels[i, 0,j,k,0]#+self.root_states[:1, 0]
-                        y = self.global_pixels[i, 0,j,k,1]
-                        z = self.global_pixels[i, 0,j,k,2]
-                        sphere_pose = gymapi.Transform(gymapi.Vec3(x, y, z), r=None)
-                        gymutil.draw_lines(sphere_geom, self.gym, self.viewer, self.envs[i], sphere_pose)
-        else:
-            self.local_pixels_downsampled = self.downsampled_cloud.reshape(-1, 3)
-            self.sensor_axis= self.sensor_pos_tensor[:,:]       
-            pixels = self.local_pixels_downsampled.view(self.num_envs,-1,3)
-            pixels_num = pixels.shape[1]
-            sensor_axis_shaped = self.sensor_axis.unsqueeze(1).repeat(1, pixels_num, 1).view(self.num_envs, -1, 3)
-            sensor_quat = self.sensor_quat_tensor.unsqueeze(1).repeat(1, pixels_num, 1).view(self.num_envs, -1, 4)
-            self.global_pixels = sensor_axis_shaped + quat_apply(sensor_quat, pixels)
+        # if self.sensor_cfg.pointcloud_in_world_frame:
+        #     self.global_pixels =  self.downsampled_cloud
+        #     for i in range(self.selected_env_idx,self.selected_env_idx+1):
+        #         for j in range(int(self.global_pixels.shape[2])):
+        #             for k in range(self.global_pixels.shape[3]):
+        #                 x = self.global_pixels[i, 0,j,k,0]#+self.root_states[:1, 0]
+        #                 y = self.global_pixels[i, 0,j,k,1]
+        #                 z = self.global_pixels[i, 0,j,k,2]
+        #                 sphere_pose = gymapi.Transform(gymapi.Vec3(x, y, z), r=None)
+        #                 gymutil.draw_lines(sphere_geom, self.gym, self.viewer, self.envs[i], sphere_pose)
+        # else:
+        #     self.local_pixels_downsampled = self.downsampled_cloud.reshape(-1, 3)
+        #     self.sensor_axis= self.sensor_pos_tensor[:,:]       
+        #     pixels = self.local_pixels_downsampled.view(self.num_envs,-1,3)
+        #     pixels_num = pixels.shape[1]
+        #     sensor_axis_shaped = self.sensor_axis.unsqueeze(1).repeat(1, pixels_num, 1).view(self.num_envs, -1, 3)
+        #     sensor_quat = self.sensor_quat_tensor.unsqueeze(1).repeat(1, pixels_num, 1).view(self.num_envs, -1, 4)
+        #     self.global_pixels = sensor_axis_shaped + quat_apply(sensor_quat, pixels)
             
-            # def draw_line(p1, p2, color, gym, viewer, env):
+        #     # def draw_line(p1, p2, color, gym, viewer, env):
 
-            self.global_pixels.view(self.num_envs,-1, 3)
-            for i in range(self.selected_env_idx,self.selected_env_idx+1):
-                for j in range(0,self.global_pixels.shape[1]):
-                        x = self.global_pixels[i, j,0]
-                        y = self.global_pixels[i, j,1]
-                        z = self.global_pixels[i, j,2]
-                        sphere_pose = gymapi.Transform(gymapi.Vec3(x, y, z), r=None)
-                        gymutil.draw_lines(sphere_geom, self.gym, self.viewer, self.envs[i], sphere_pose) 
+        #     self.global_pixels.view(self.num_envs,-1, 3)
+        #     for i in range(self.selected_env_idx,self.selected_env_idx+1):
+        #         for j in range(0,self.global_pixels.shape[1]):
+        #                 x = self.global_pixels[i, j,0]
+        #                 y = self.global_pixels[i, j,1]
+        #                 z = self.global_pixels[i, j,2]
+        #                 sphere_pose = gymapi.Transform(gymapi.Vec3(x, y, z), r=None)
+        #                 gymutil.draw_lines(sphere_geom, self.gym, self.viewer, self.envs[i], sphere_pose) 
+
+        max_envs_to_draw = int(getattr(self.cfg.viewer, 'lidar_vis_num_envs', self.num_envs))
+        max_envs_to_draw = max(1, min(max_envs_to_draw, self.num_envs))
+        max_envs_to_draw = 1
+        max_points = int(getattr(self.cfg.viewer, 'lidar_vis_max_points', 180))
+        near_geom = gymutil.WireframeSphereGeometry(0.012, 4, 4, None, color=(1, 0, 0))
+        far_geom = gymutil.WireframeSphereGeometry(0.012, 4, 4, None, color=(0, 1, 0))
+        near_threshold = 0.6
+
+        for env_idx in range(max_envs_to_draw):
+            points_local = self.lidar_points_buf.squeeze(1)[env_idx]
+            dists = self.lidar_dist_buf.squeeze(1)[env_idx]
+            valid_mask = (dists > self.sensor_cfg.min_range) & (dists < self.sensor_cfg.max_range)
+            if not torch.any(valid_mask):
+                continue
+
+            points_local = points_local[valid_mask]
+            dists = dists[valid_mask]
+
+            if points_local.shape[0] > max_points:
+                idx = torch.linspace(0, points_local.shape[0] - 1, max_points, device=self.device).long()
+                points_local = points_local[idx]
+                dists = dists[idx]
+
+            sensor_pos = self.sensor_pos_tensor[env_idx]
+            sensor_quat = self.sensor_quat_tensor[env_idx]
+            sensor_quat_expand = sensor_quat.unsqueeze(0).expand(points_local.shape[0], -1)
+            world_points = sensor_pos.unsqueeze(0) + quat_apply(sensor_quat_expand, points_local)
+
+            for point_idx in range(world_points.shape[0]):
+                pos = world_points[point_idx]
+                geom = near_geom if dists[point_idx] < near_threshold else far_geom
+                pose = gymapi.Transform(gymapi.Vec3(float(pos[0]), float(pos[1]), float(pos[2])), r=None)
+                gymutil.draw_lines(geom, self.gym, self.viewer, self.envs[env_idx], pose)
 
 
 

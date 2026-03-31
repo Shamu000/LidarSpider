@@ -11,7 +11,12 @@
 3.
 
 
-# 二.git使用指南  
+# 二.待办
+- [x] 示例 
+- [ ] 示例
+
+
+# 三.git使用指南  
 ## 1.链接远程仓库并同步分支状态
 ```bash
 git remote add origin git@github.com:CZY412/OmniPerception.git
@@ -55,4 +60,11 @@ git branch -d temp
 ## 7.合并分支
 ```bash
 git merge --no-ff temp # 把temp合并到当前分支
+```
+
+## 8.回退与恢复
+```bash
+git checkout <哈希值>
+
+git checkout main
 ```

@@ -157,7 +157,7 @@ class LeggedRobot(BaseTask, LeggedRobotRewMixin):
     def check_termination(self):
         """ Check if environments need to be reset
         """
-        self.reset_buf = torch.any(torch.norm(self.contact_forces[:, self.termination_contact_indices, :], dim=-1) > 1., dim=1) & (self.episode_length_buf > 24)
+        self.reset_buf = torch.any(torch.norm(self.contact_forces[:, self.termination_contact_indices, :], dim=-1) > 1., dim=1)
         # print(f"Test:Trunk force: {torch.norm(self.contact_forces[:, self.termination_contact_indices, :], dim=-1)}")
         # print(f"Test:height: {torch.mean(self.base_pos[:, 2].unsqueeze(1) - self.measured_heights, dim=1)}")
         # print(f"Test:Original reset buffer: {self.reset_buf}")
@@ -465,7 +465,7 @@ class LeggedRobot(BaseTask, LeggedRobotRewMixin):
             env_ids (List[int]): Environemnt ids
         """
         self.dof_pos[env_ids] = self.default_dof_pos * \
-            torch_rand_float(self.cfg.init_state.rand_zoom_min, self.cfg.init_state.rand_zoom_max, (len(env_ids), self.num_dof), device=self.device)
+            torch_rand_float(0.5, 1.5, (len(env_ids), self.num_dof), device=self.device)
         self.dof_vel[env_ids] = 0.
 
         env_ids_int32 = env_ids.to(dtype=torch.int32)

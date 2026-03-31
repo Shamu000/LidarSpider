@@ -59,24 +59,29 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
         restitution = 0.
         # rough terrain only:
         measure_heights = False # 若为true，则要给obs_buf加187维
-        draw_lidar_points = False
-        measured_points_x = [-0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1,
-                             0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]  # 1mx1.6m rectangle (without center line)
-        measured_points_y = [-0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4, 0.5]
-        selected = False  # select a unique terrain type and pass all arguments
-        terrain_kwargs = None  # Dict of arguments for selected terrain
-        max_init_terrain_level = 3  # starting curriculum state 最大难度等级，用于初始化机器人的位置
-        terrain_length = 18.
-        terrain_width = 18.
+        draw_lidar_points = True
+
+        # issacgym parameters
+        # measured_points_x = [-0.8, -0.7, -0.6, -0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1,
+        #                      0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]  # 1mx1.6m rectangle (without center line)
+        # measured_points_y = [-0.5, -0.4, -0.3, -0.2, -0.1, 0., 0.1, 0.2, 0.3, 0.4, 0.5]
+        # selected = False  # select a unique terrain type and pass all arguments
+        # terrain_kwargs = None  # Dict of arguments for selected terrain
+        # difficulty_scale = 1.0  # Scale for difficulty in curriculum
+        # # terrain types: [smooth slope, rough slope, stairs up, stairs down, discrete]
+        # terrain_proportions = [0.1, 0.1, 0.3, 0.3, 0.2]
+        # # confined terrain types: [tunnel, barrier, timber_piles, confined_gap]
+        # confined_terrain_proportions = [0.0, 0.2, 0.3, 0.3]
+        # # trimesh only:
+        # slope_treshold = 0.75  # slopes above this threshold will be corrected to vertical surfaces
+
+
+
+        max_init_terrain_level = 2  # starting curriculum state 最大难度等级，用于初始化机器人的位置
+        terrain_length = 10.
+        terrain_width = 10.
         num_rows = 4  # number of terrain rows (levels)
         num_cols = 4  # number of terrain cols (types)
-        difficulty_scale = 1.0  # Scale for difficulty in curriculum
-        # terrain types: [smooth slope, rough slope, stairs up, stairs down, discrete]
-        terrain_proportions = [0.1, 0.1, 0.3, 0.3, 0.2]
-        # confined terrain types: [tunnel, barrier, timber_piles, confined_gap]
-        confined_terrain_proportions = [0.0, 0.2, 0.3, 0.3]
-        # trimesh only:
-        slope_treshold = 0.75  # slopes above this threshold will be corrected to vertical surfaces
 
         # 雷达新加
         hf2mesh_method = "grid"  # grid or fast
@@ -102,6 +107,7 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
 
         max_difficulty = False # 待测
 
+        # Omniperception parameters
         terrain_dict = {"smooth slope": 0.0, # 平缓斜坡
                         "rough slope up": 0.5, # 崎岖上坡
                         "rough slope down": 0.5, # 崎岖下坡
@@ -114,8 +120,8 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
                         "pit": 0., # 坑洞 / 陷坑
                         "wall": 0., # 墙壁
                         "platform": 0., # 平台
-                        "large stairs up": 0., # 大阶梯上
-                        "large stairs down": 0., # 大阶梯下
+                        "large stairs up": 0.5, # 大阶梯上
+                        "large stairs down": 0.5, # 大阶梯下
                         "parkour": 0., # 跑酷地形
                         "parkour_hurdle": 0., # 跑酷 — 障碍（跨栏）
                         "parkour_flat": 0.0, # 跑酷 — 平地
@@ -180,27 +186,27 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
         
         # Core sensor settings
         sensor_type: "ElSpiderAirRoughLidarCfg.LidarType" = field(
-            default_factory=lambda: ElSpiderAirRoughLidarCfg.LidarType.MID360
+            default_factory=lambda: ElSpiderAirRoughLidarCfg.LidarType.SIMPLE_GRID
         )
         num_sensors: int = 1
-        dt: float = 0.02  # simulation time step
-        update_frequency: float = 50.0  # sensor update rate in Hz
+        dt: float = 0.1  # simulation time step
+        update_frequency: float = 10.0  # sensor update rate in Hz
 
         # 雷达初始姿态
         sensor_offset_pos: list = field(default_factory=lambda: [0.3, 0.0, 0.35])  # [x, y, z] in meters
-        sensor_offset_rpy: list = field(default_factory=lambda: [3.14, 0.0, 3.14])  # [roll, pitch, yaw] in degrees
+        sensor_offset_rpy: list = field(default_factory=lambda: [180.0, 0.0, 0.0])  # [roll, pitch, yaw] in degrees
         
         # Range settings
         max_range: float = 50.0
-        min_range: float = 0.2
+        min_range: float = 0.1
         
         # Grid-based lidar settings (only used when sensor_type is SIMPLE_GRID)
-        horizontal_line_num: int = 80
-        vertical_line_num: int = 50
+        horizontal_line_num: int = 48
+        vertical_line_num: int = 12
         horizontal_fov_deg_min: float = -180
         horizontal_fov_deg_max: float = 180
-        vertical_fov_deg_min: float = -2
-        vertical_fov_deg_max: float = 57
+        vertical_fov_deg_min: float = -7
+        vertical_fov_deg_max: float = 52
         
         # Height scanner settings (only used when sensor_type is HEIGHT_SCANNER)
         height_scanner_size: list = field(default_factory=lambda: [2.0, 2.0])  # [length, width] in meters
@@ -292,7 +298,7 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
             ]
 
     class init_state(ElSpiderAirRoughTrainCfg.init_state):
-        pos = [0.0, 0.0, 0.4]  # x,y,z [m]
+        pos = [0.0, 0.0, 0.6]  # x,y,z [m]
         default_joint_angles = {  # = target angles [rad] when action = 0.0
             "RF_HAA": 0.0,
             "RM_HAA": 0.0,
@@ -315,8 +321,6 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
             "LM_KFE": 0.6,
             "LB_KFE": 0.6,
         }
-        rand_zoom_min = 0.8
-        rand_zoom_max = 1.2
     
     class commands(ElSpiderAirRoughTrainCfg.commands):
         curriculum = False
@@ -339,7 +343,7 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
         self_collisions = 0 # 1 to disable, 0 to enable...bitwise filter
 
     class rewards(ElSpiderAirRoughTrainCfg.rewards):
-        base_height_target = 0.30
+        base_height_target = 0.35
         max_contact_force = 500.
         only_positive_rewards = True
 
@@ -366,18 +370,18 @@ class ElSpiderAirRoughLidarCfg(ElSpiderAirRoughTrainCfg):
             foot_acc = [0, 0, 0]
             obstacle_avoidance = [1., 1., 1.]
             # Base penalties
-            lin_vel_z = [-2.0, -2.5, -3.0]
+            lin_vel_z = [-1.0, -1.5, -2.0]
             ang_vel_xy = -0.05
             orientation = -0.3
             torques = -0.00001
             base_height = [-2.0, -3.0, -4.0]
             # DOF penalties
             dof_vel = 0.
-            dof_acc = -5e-8
+            dof_acc = -0
             dof_pos_limits = -1.0
             # dof_power = -2.e-4
-            action_rate = [-0.001, -0.001, -0.001]
-            action_smoothness = -0.01
+            action_rate = [-0.0001, -0.001, -0.005]
+            action_smoothness = -0
             # Feet penalties
             feet_slip = [-0.0, -0.4, -1.2]  #脚部打滑惩罚
             jump_air = 0
